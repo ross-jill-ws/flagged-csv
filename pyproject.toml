@@ -19,7 +19,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "pandas>=2.0.0",
+    "numpy<2.0",  # Pin to NumPy 1.x to avoid compatibility issues
+    "pandas>=2.0.0,<2.2.0",  # Compatible with NumPy 1.x
     "openpyxl>=3.1.0",
     "python-calamine>=0.2.0",
     "xlrd>=2.0.0",
