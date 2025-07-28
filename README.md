@@ -313,9 +313,11 @@ uv run flagged-csv --help
 - Python 3.11+
 - pandas >= 2.0.0, < 2.2.0
 - numpy < 2.0 (for compatibility)
+- pydantic >= 2.0.0 (for configuration models)
 - openpyxl >= 3.1.0
 - python-calamine >= 0.2.0 (for robust Excel reading)
 - xlrd >= 2.0.0 (for older Excel format support)
+- click >= 8.0.0 (for CLI)
 
 ## Contributing
 

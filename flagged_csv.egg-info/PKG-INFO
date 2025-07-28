@@ -21,6 +21,7 @@ Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: numpy<2.0
 Requires-Dist: pandas<2.2.0,>=2.0.0
+Requires-Dist: pydantic>=2.0.0
 Requires-Dist: openpyxl>=3.1.0
 Requires-Dist: python-calamine>=0.2.0
 Requires-Dist: xlrd>=2.0.0
@@ -36,24 +37,30 @@ Convert XLSX files to CSV while preserving visual formatting information as inli
 
 Flagged CSV is a Python library and command-line tool that converts Excel (XLSX) files to CSV format while preserving important visual information that would normally be lost in conversion:
 
-- **Cell background colors** - Preserved as `{{#RRGGBB}}` flags
-- **Merged cells** - Marked with `{{MG:XXXXXX}}` flags where XXXXXX is a unique identifier
+- **Cell background colors** - Preserved as `{#RRGGBB}` flags
+- **Merged cells** - Marked with `{MG:XXXXXX}` flags where XXXXXX is a unique identifier
 - **Cell formatting** - Currency symbols, number formats, dates preserved as displayed in Excel
 
 ## Installation
+
+### Via uv (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/flagged-csv.git
+cd flagged-csv
+
+# Sync dependencies with uv
+uv sync
+
+# Install in development mode
+uv pip install -e .
+```
 
 ### Via pip
 
 ```bash
 pip install flagged-csv
-```
-
-### From source
-
-```bash
-git clone https://github.com/yourusername/flagged-csv.git
-cd flagged-csv
-pip install -e .
 ```
 
 ## Quick Start
@@ -73,7 +80,13 @@ flagged-csv input.xlsx -t Sheet1 --preserve-formats --include-colors --ignore-co
 
 ### Python Library Usage
 
+```bash
+# Run Python scripts with uv
+uv run python your_script.py
+```
+
 ```python
+# your_script.py
 from flagged_csv import XlsxConverter
 
 # Create converter instance
@@ -97,12 +110,12 @@ with open('output.csv', 'w') as f:
 ## Flag Format Specification
 
 ### Color Flags
-- Format: `{{#RRGGBB}}`
-- Example: `Sales{{#FF0000}}` - "Sales" with red background
-- Multiple flags can be combined: `100{{#00FF00}}{{MG:123456}}`
+- Format: `{#RRGGBB}`
+- Example: `Sales{#FF0000}` - "Sales" with red background
+- Multiple flags can be combined: `100{#00FF00}{MG:123456}`
 
 ### Merge Flags  
-- Format: `{{MG:XXXXXX}}` where XXXXXX is a 6-digit identifier
+- Format: `{MG:XXXXXX}` where XXXXXX is a 6-digit identifier
 - All cells in a merged range share the same ID
 - The first cell contains the actual value
 - Subsequent cells contain only the merge flag
@@ -115,7 +128,7 @@ Given an Excel file with:
 
 The CSV output would be:
 ```csv
-Total Sales{{#0000FF}},$1000{{#00FF00}}{{MG:384756}},{{MG:384756}},{{MG:384756}}
+Total Sales{#0000FF},$1000{#00FF00}{MG:384756},{MG:384756},{MG:384756}
 ```
 
 ## Configuration Options
@@ -151,6 +164,8 @@ converter = XlsxConverter(config)
 
 ### Processing Multiple Sheets
 
+Save this as `process_sheets.py`:
+
 ```python
 from flagged_csv import XlsxConverter
 import pandas as pd
@@ -169,9 +184,17 @@ for sheet_name in xl_file.sheet_names:
     
     with open(f'{sheet_name}.csv', 'w') as f:
         f.write(csv_content)
+    print(f'Converted {sheet_name} -> {sheet_name}.csv')
+```
+
+Run with:
+```bash
+uv run python process_sheets.py
 ```
 
 ### Parsing Flagged CSV
+
+Save this as `parse_flagged.py`:
 
 ```python
 import re
@@ -182,8 +205,8 @@ def parse_flagged_csv(file_path):
     df = pd.read_csv(file_path, header=None)
     
     # Regular expressions for parsing flags
-    color_pattern = r'{{#([0-9A-Fa-f]{6})}}'
-    merge_pattern = r'{{MG:(\d{6})}}'
+    color_pattern = r'{#([0-9A-Fa-f]{6})}'
+    merge_pattern = r'{MG:(\d{6})}'
     
     # Extract clean values and formatting info
     for row_idx in range(len(df)):
@@ -203,10 +226,21 @@ def parse_flagged_csv(file_path):
                 print(f"Cell ({row_idx},{col_idx}) is part of merge group {merge_id}")
             
             # Get clean value (remove all flags)
-            clean_value = re.sub(r'{{[^}]+}}', '', cell)
+            clean_value = re.sub(r'{[^}]+}', '', cell)
             df.iloc[row_idx, col_idx] = clean_value
     
     return df
+
+# Example usage
+if __name__ == "__main__":
+    df = parse_flagged_csv('output.csv')
+    print("\nCleaned data:")
+    print(df)
+```
+
+Run with:
+```bash
+uv run python parse_flagged.py
 ```
 
 ### Working with Merged Cells
@@ -221,7 +255,7 @@ def reconstruct_merged_cells(df):
             cell = str(df.iloc[row_idx, col_idx])
             
             # Find merge ID
-            match = re.search(r'{{MG:(\d{6})}}', cell)
+            match = re.search(r'{MG:(\d{6})}', cell)
             if match:
                 merge_id = match.group(1)
                 if merge_id not in merge_groups:
@@ -277,10 +311,39 @@ except FileNotFoundError as e:
 - Large files are processed efficiently with streaming where possible
 - Color extraction uses caching to avoid repeated theme color lookups
 
+## Testing
+
+Run the test suite using uv:
+
+```bash
+# Run all tests
+uv run pytest tests/test_converter.py
+
+# Run tests with verbose output
+uv run pytest tests/test_converter.py -v
+
+# Run a specific test
+uv run pytest tests/test_converter.py::TestXlsxConverter::test_color_extraction -v
+```
+
+## Development
+
+```bash
+# Set up development environment
+uv sync
+
+# Run the example script
+uv run python example.py
+
+# Run the CLI tool in development
+uv run flagged-csv --help
+```
+
 ## Requirements
 
 - Python 3.11+
-- pandas >= 2.0.0
+- pandas >= 2.0.0, < 2.2.0
+- numpy < 2.0 (for compatibility)
 - openpyxl >= 3.1.0
 - python-calamine >= 0.2.0 (for robust Excel reading)
 - xlrd >= 2.0.0 (for older Excel format support)
@@ -288,6 +351,13 @@ except FileNotFoundError as e:
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Run tests to ensure everything works (`uv run pytest tests/`)
+4. Commit your changes (`git commit -m 'Add amazing feature'`)
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
 
 ## License
 
