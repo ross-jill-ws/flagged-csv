@@ -1,0 +1,268 @@
+# Flagged CSV
+
+Convert XLSX files to CSV while preserving visual formatting information as inline flags.
+
+## Overview
+
+Flagged CSV is a Python library and command-line tool that converts Excel (XLSX) files to CSV format while preserving important visual information that would normally be lost in conversion:
+
+- **Cell background colors** - Preserved as `{{#RRGGBB}}` flags
+- **Merged cells** - Marked with `{{MG:XXXXXX}}` flags where XXXXXX is a unique identifier
+- **Cell formatting** - Currency symbols, number formats, dates preserved as displayed in Excel
+
+## Installation
+
+### Via pip
+
+```bash
+pip install flagged-csv
+```
+
+### From source
+
+```bash
+git clone https://github.com/yourusername/flagged-csv.git
+cd flagged-csv
+pip install -e .
+```
+
+## Quick Start
+
+### Command Line Usage
+
+```bash
+# Basic conversion
+flagged-csv input.xlsx -t Sheet1 > output.csv
+
+# Include colors and merge information
+flagged-csv input.xlsx -t Sheet1 --include-colors --signal-merge -o output.csv
+
+# Preserve formatting and ignore white backgrounds
+flagged-csv input.xlsx -t Sheet1 --preserve-formats --include-colors --ignore-colors "#FFFFFF"
+```
+
+### Python Library Usage
+
+```python
+from flagged_csv import XlsxConverter
+
+# Create converter instance
+converter = XlsxConverter()
+
+# Convert with all formatting options
+csv_content = converter.convert_to_csv(
+    'data.xlsx',
+    tab_name='Sheet1',
+    include_colors=True,
+    signal_merge=True,
+    preserve_formats=True,
+    ignore_colors='#FFFFFF'
+)
+
+# Save to file
+with open('output.csv', 'w') as f:
+    f.write(csv_content)
+```
+
+## Flag Format Specification
+
+### Color Flags
+- Format: `{{#RRGGBB}}`
+- Example: `Sales{{#FF0000}}` - "Sales" with red background
+- Multiple flags can be combined: `100{{#00FF00}}{{MG:123456}}`
+
+### Merge Flags  
+- Format: `{{MG:XXXXXX}}` where XXXXXX is a 6-digit identifier
+- All cells in a merged range share the same ID
+- The first cell contains the actual value
+- Subsequent cells contain only the merge flag
+
+### Example Output
+
+Given an Excel file with:
+- Cell A1: "Total Sales" with blue background (#0000FF)
+- Cells B1-D1: Merged cell containing "$1,000" with green background (#00FF00)
+
+The CSV output would be:
+```csv
+Total Sales{{#0000FF}},$1000{{#00FF00}}{{MG:384756}},{{MG:384756}},{{MG:384756}}
+```
+
+## Configuration Options
+
+### CLI Options
+
+- `-t, --tab-name`: Sheet name to convert (required)
+- `-o, --output`: Output file path (default: stdout)
+- `--format`: Output format: csv, html, or markdown (default: csv)
+- `--include-colors`: Include cell background colors
+- `--signal-merge`: Include merged cell information
+- `--preserve-formats`: Preserve number/date formatting
+- `--ignore-colors`: Comma-separated hex colors to ignore
+- `--no-header`: Exclude header row from output
+- `--keep-na`: Keep NA values instead of converting to empty strings
+
+### Python API Options
+
+```python
+from flagged_csv import XlsxConverter, XlsxConverterConfig
+
+# Create converter with custom configuration
+config = XlsxConverterConfig(
+    keep_default_na=False,  # Convert NA to empty strings
+    index=False,            # Don't include row index
+    header=True             # Include column headers
+)
+
+converter = XlsxConverter(config)
+```
+
+## Advanced Usage
+
+### Processing Multiple Sheets
+
+```python
+from flagged_csv import XlsxConverter
+import pandas as pd
+
+converter = XlsxConverter()
+
+# Process all sheets in a workbook
+xl_file = pd.ExcelFile('multi_sheet.xlsx')
+for sheet_name in xl_file.sheet_names:
+    csv_content = converter.convert_to_csv(
+        'multi_sheet.xlsx',
+        tab_name=sheet_name,
+        include_colors=True,
+        signal_merge=True
+    )
+    
+    with open(f'{sheet_name}.csv', 'w') as f:
+        f.write(csv_content)
+```
+
+### Parsing Flagged CSV
+
+```python
+import re
+import pandas as pd
+
+def parse_flagged_csv(file_path):
+    """Parse a flagged CSV file and extract values and formatting."""
+    df = pd.read_csv(file_path, header=None)
+    
+    # Regular expressions for parsing flags
+    color_pattern = r'{{#([0-9A-Fa-f]{6})}}'
+    merge_pattern = r'{{MG:(\d{6})}}'
+    
+    # Extract clean values and formatting info
+    for row_idx in range(len(df)):
+        for col_idx in range(len(df.columns)):
+            cell = str(df.iloc[row_idx, col_idx])
+            
+            # Extract color
+            color_match = re.search(color_pattern, cell)
+            if color_match:
+                color = color_match.group(1)
+                print(f"Cell ({row_idx},{col_idx}) has color #{color}")
+            
+            # Extract merge ID
+            merge_match = re.search(merge_pattern, cell)
+            if merge_match:
+                merge_id = merge_match.group(1)
+                print(f"Cell ({row_idx},{col_idx}) is part of merge group {merge_id}")
+            
+            # Get clean value (remove all flags)
+            clean_value = re.sub(r'{{[^}]+}}', '', cell)
+            df.iloc[row_idx, col_idx] = clean_value
+    
+    return df
+```
+
+### Working with Merged Cells
+
+```python
+def reconstruct_merged_cells(df):
+    """Reconstruct merged cell ranges from flagged CSV."""
+    merge_groups = {}
+    
+    for row_idx in range(len(df)):
+        for col_idx in range(len(df.columns)):
+            cell = str(df.iloc[row_idx, col_idx])
+            
+            # Find merge ID
+            match = re.search(r'{{MG:(\d{6})}}', cell)
+            if match:
+                merge_id = match.group(1)
+                if merge_id not in merge_groups:
+                    merge_groups[merge_id] = []
+                merge_groups[merge_id].append((row_idx, col_idx))
+    
+    # merge_groups now contains all cells belonging to each merge
+    for merge_id, cells in merge_groups.items():
+        print(f"Merge {merge_id}: {cells}")
+```
+
+## Output Formats
+
+### CSV (Default)
+Standard CSV format with flags appended to cell values.
+
+### HTML
+```python
+html_output = converter.convert_to_csv(
+    'data.xlsx',
+    tab_name='Sheet1',
+    output_format='html',
+    include_colors=True
+)
+```
+
+### Markdown
+```python
+markdown_output = converter.convert_to_csv(
+    'data.xlsx', 
+    tab_name='Sheet1',
+    output_format='markdown',
+    include_colors=True
+)
+```
+
+## Error Handling
+
+The library handles various error cases gracefully:
+
+```python
+try:
+    csv_content = converter.convert_to_csv('data.xlsx', tab_name='InvalidSheet')
+except ValueError as e:
+    print(f"Sheet not found: {e}")
+except FileNotFoundError as e:
+    print(f"File not found: {e}")
+```
+
+## Performance Considerations
+
+- The library uses multiple fallback engines (calamine, openpyxl, xlrd) for maximum compatibility
+- Large files are processed efficiently with streaming where possible
+- Color extraction uses caching to avoid repeated theme color lookups
+
+## Requirements
+
+- Python 3.11+
+- pandas >= 2.0.0
+- openpyxl >= 3.1.0
+- python-calamine >= 0.2.0 (for robust Excel reading)
+- xlrd >= 2.0.0 (for older Excel format support)
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+This library is inspired by the need to preserve Excel's visual information during data processing pipelines, particularly for financial and business reporting applications where cell colors and merged cells convey important meaning.
