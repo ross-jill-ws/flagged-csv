@@ -396,8 +396,12 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## AI Integration Guide
 
-When using Flagged CSV with AI systems (ChatGPT, Claude, etc.), include this prompt to help the AI understand the format:
+When using Flagged CSV with AI systems (ChatGPT, Claude, etc.), you have two options:
 
+### Option 1: Use the provided prompt file
+Simply include the contents of `flagged-csv.prompt.md` in your conversation with the AI. This file contains the complete specification for the Flagged CSV format.
+
+### Option 2: Use this condensed prompt
 ```
 The CSV data uses Flagged CSV format where:
 - {#RRGGBB} indicates cell background color (e.g., {#FF0000} is red)
@@ -415,3 +419,5 @@ This simple context enables AI to answer questions about:
 ## Acknowledgments
 
 This library is inspired by the need to preserve Excel's visual information during data processing pipelines, particularly for financial and business reporting applications where cell colors and merged cells convey important meaning. It bridges the gap between human-readable Excel files and AI-processable data formats.
+
+The code for this project was primarily written using [Claude Code](https://claude.ai/code), demonstrating how AI can help create tools that make data more accessible to AI systems.
