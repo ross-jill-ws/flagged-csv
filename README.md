@@ -1,12 +1,12 @@
 # Flagged CSV
 
 Convert XLSX files to CSV while preserving visual formatting information as inline flags.
-![ShowExcelConversionOriginalCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/9241d467-ab47-4005-8438-3bad05864a6b)
 
 Traditional XLSX → CSV conversion will cause the loss of format such as background cell colors or cell merge:
-![ShowExcelConversionFlaggedCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/2dee974a-d480-4f71-9404-10b121df388f)
+![ShowExcelConversionOriginalCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/9241d467-ab47-4005-8438-3bad05864a6b)
 
 The new Flagged CSV will attach important flags to the original cell value, keeping the colors/cell-merge with {} flags
+![ShowExcelConversionFlaggedCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/2dee974a-d480-4f71-9404-10b121df388f)
 
 ## Why Flagged CSV is Critical for AI
 
