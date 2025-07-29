@@ -2,20 +2,23 @@ Metadata-Version: 2.4
 Name: flagged-csv
 Version: 0.1.0
 Summary: Convert XLSX files to CSV with visual formatting preserved as inline flags
-Author-email: Your Name <your.email@example.com>
-Project-URL: Homepage, https://github.com/yourusername/flagged-csv
-Project-URL: Documentation, https://github.com/yourusername/flagged-csv#readme
-Project-URL: Repository, https://github.com/yourusername/flagged-csv.git
-Project-URL: Issues, https://github.com/yourusername/flagged-csv/issues
-Keywords: xlsx,csv,excel,converter,formatting,colors,merge-cells
+Author-email: ross <ross.jill.websolution@gmail.com>
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/ross-jill-ws/flagged-csv
+Project-URL: Documentation, https://github.com/ross-jill-ws/flagged-csv#readme
+Project-URL: Repository, https://github.com/ross-jill-ws/flagged-csv.git
+Project-URL: Issues, https://github.com/ross-jill-ws/flagged-csv/issues
+Keywords: xlsx,csv,excel,converter,formatting,colors,merge-cells,ai,data-processing
 Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Developers
-Classifier: License :: OSI Approved :: MIT License
+Classifier: Intended Audience :: Science/Research
 Classifier: Programming Language :: Python :: 3
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
 Classifier: Topic :: Office/Business :: Financial :: Spreadsheet
 Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Scientific/Engineering :: Information Analysis
+Classifier: Operating System :: OS Independent
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 License-File: LICENSE
@@ -32,6 +35,66 @@ Dynamic: license-file
 # Flagged CSV
 
 Convert XLSX files to CSV while preserving visual formatting information as inline flags.
+
+Traditional XLSX → CSV conversion will cause the loss of format such as background cell colors or cell merge:
+![ShowExcelConversionOriginalCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/9241d467-ab47-4005-8438-3bad05864a6b)
+
+The new Flagged CSV will attach important flags to the original cell value, keeping the colors/cell-merge with {} flags
+![ShowExcelConversionFlaggedCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/2dee974a-d480-4f71-9404-10b121df388f)
+
+## Why Flagged CSV is Critical for AI
+
+Traditional AI models cannot process XLSX files directly. When users convert XLSX to CSV for AI processing, critical visual information is lost - colors that indicate categories, merged cells that show date ranges, and formatting that conveys meaning. This forces users to manually add context that was already present visually.
+
+### Real-World Example: AI's Limitation with Standard CSV
+
+Consider this financial data with colored categories and merged cells for date ranges:
+
+**Original Excel file** has:
+- Different colors for each expense category
+- Merged cells showing the time span for each expense
+- My color1 and My color4 share the same green color (#84E291)
+
+**After standard CSV conversion**, an AI assistant fails to answer basic questions:
+
+> **User**: "Which two items have the same color?"
+> 
+> **AI**: "The provided CSV file does not contain any information about the colors of the cells..."
+
+> **User**: "What is the time range for each color's spend?"
+> 
+> **AI**: "I cannot determine time ranges from the CSV data..."
+
+### The Flagged CSV Solution
+
+With Flagged CSV format, the same AI can now answer correctly:
+
+```csv
+Name,Color,Value,JUL{#0E2841},AUG{#0E2841},SEP{#0E2841},OCT{#0E2841},NOV{#0E2841},DEC{#0E2841}
+My color1,{#84E291},30,$500{#84E291}{MG:881261},{MG:881261},,,,
+My color2,{#E49EDD},32,$600{#E49EDD}{MG:316508},{MG:316508},{MG:316508},,,
+My color3,{#F6C6AC},34,$700{#F6C6AC}{MG:353471},{MG:353471},{MG:353471},{MG:353471},,
+My color4,{#84E291},36,$800{#84E291}{MG:860393},{MG:860393},{MG:860393},{MG:860393},{MG:860393},{MG:860393}
+```
+
+Now the AI can answer:
+
+> **Q: Which two items have the same color?**
+> 
+> **A: My color1 and My color4 have the same color (#84E291).**
+
+> **Q: What is the time range and spend for each item?**
+> 
+> **A:** 
+> - **My color1**: Time range JUL-AUG with a spend of $500
+> - **My color2**: Time range JUL-SEP with a spend of $600  
+> - **My color3**: Time range JUL-OCT with a spend of $700
+> - **My color4**: Time range JUL-DEC with a spend of $800
+
+This enables AI to understand:
+- **Color patterns** - Which items belong to the same category
+- **Time ranges** - Merged cells indicate duration
+- **Relationships** - Visual cues that humans naturally understand
 
 ## Overview
 
@@ -344,9 +407,11 @@ uv run flagged-csv --help
 - Python 3.11+
 - pandas >= 2.0.0, < 2.2.0
 - numpy < 2.0 (for compatibility)
+- pydantic >= 2.0.0 (for configuration models)
 - openpyxl >= 3.1.0
 - python-calamine >= 0.2.0 (for robust Excel reading)
 - xlrd >= 2.0.0 (for older Excel format support)
+- click >= 8.0.0 (for CLI)
 
 ## Contributing
 
@@ -363,6 +428,30 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## AI Integration Guide
+
+When using Flagged CSV with AI systems (ChatGPT, Claude, etc.), you have two options:
+
+### Option 1: Use the provided prompt file
+Simply include the contents of `flagged-csv.prompt.md` in your conversation with the AI. This file contains the complete specification for the Flagged CSV format.
+
+### Option 2: Use this condensed prompt
+```
+The CSV data uses Flagged CSV format where:
+- {#RRGGBB} indicates cell background color (e.g., {#FF0000} is red)
+- {MG:XXXXXX} indicates merged cells (same ID = same merged group)
+- The value in the merged cell should be applied to the entire range as a whole.
+- Multiple flags can appear together: value{#color}{MG:id}
+```
+
+This simple context enables AI to answer questions about:
+- Color-based categorization
+- Time ranges from merged cells
+- Visual patterns and relationships
+- Conditional formatting meanings
+
 ## Acknowledgments
 
-This library is inspired by the need to preserve Excel's visual information during data processing pipelines, particularly for financial and business reporting applications where cell colors and merged cells convey important meaning.
+This library is inspired by the need to preserve Excel's visual information during data processing pipelines, particularly for financial and business reporting applications where cell colors and merged cells convey important meaning. It bridges the gap between human-readable Excel files and AI-processable data formats.
+
+The code for this project was primarily written using [Claude Code](https://claude.ai/code), demonstrating how AI can help create tools that make data more accessible to AI systems.

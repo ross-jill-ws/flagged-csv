@@ -1,5 +1,7 @@
 LICENSE
+MANIFEST.in
 README.md
+flagged-csv.prompt.md
 pyproject.toml
 flagged_csv/__init__.py
 flagged_csv/cli.py
@@ -11,4 +13,3 @@ flagged_csv.egg-info/dependency_links.txt
 flagged_csv.egg-info/entry_points.txt
 flagged_csv.egg-info/requires.txt
 flagged_csv.egg-info/top_level.txt
-tests/test_converter.py
