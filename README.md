@@ -406,7 +406,7 @@ Simply include the contents of `flagged-csv.prompt.md` in your conversation with
 The CSV data uses Flagged CSV format where:
 - {#RRGGBB} indicates cell background color (e.g., {#FF0000} is red)
 - {MG:XXXXXX} indicates merged cells (same ID = same merged group)
-- Merged cells: first cell has the value, others only have the merge flag
+- The value in the merged cell should be applied to the entire range as a whole.
 - Multiple flags can appear together: value{#color}{MG:id}
 ```
 
