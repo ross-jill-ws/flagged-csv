@@ -89,3 +89,5 @@ PYPI_UPLOAD_GUIDE.md
 PYPI_UPDATE_GUIDE.md
 
 test-install
+__pycache__
+

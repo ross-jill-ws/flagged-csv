@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: flagged-csv
-Version: 0.1.0
+Version: 0.1.1
 Summary: Convert XLSX files to CSV with visual formatting preserved as inline flags
 Author-email: ross <ross.jill.websolution@gmail.com>
 License-Expression: MIT
@@ -139,6 +139,12 @@ flagged-csv input.xlsx -t Sheet1 --include-colors --signal-merge -o output.csv
 
 # Preserve formatting and ignore white backgrounds
 flagged-csv input.xlsx -t Sheet1 --preserve-formats --include-colors --ignore-colors "#FFFFFF"
+
+# Include cell locations and keep empty rows for structure preservation
+flagged-csv input.xlsx -t Sheet1 --add-location --keep-empty-lines -o output.csv
+
+# Process with size limits
+flagged-csv input.xlsx -t Sheet1 --max-rows 1000 --max-columns 200 -o output.csv
 ```
 
 ### Python Library Usage
@@ -175,13 +181,18 @@ with open('output.csv', 'w') as f:
 ### Color Flags
 - Format: `{#RRGGBB}`
 - Example: `Sales{#FF0000}` - "Sales" with red background
-- Multiple flags can be combined: `100{#00FF00}{MG:123456}`
+- Multiple flags can be combined: `100{#00FF00}{MG:123456}{l:B5}`
 
 ### Merge Flags  
 - Format: `{MG:XXXXXX}` where XXXXXX is a 6-digit identifier
 - All cells in a merged range share the same ID
 - The first cell contains the actual value
 - Subsequent cells contain only the merge flag
+
+### Location Flags
+- Format: `{l:CellRef}` where CellRef is the Excel cell coordinate
+- Example: `Value{l:A5}` - "Value" from cell A5
+- Useful for preserving cell position information
 
 ### Example Output
 
@@ -201,11 +212,15 @@ Total Sales{#0000FF},$1000{#00FF00}{MG:384756},{MG:384756},{MG:384756}
 - `-t, --tab-name`: Sheet name to convert (required)
 - `-o, --output`: Output file path (default: stdout)
 - `--format`: Output format: csv, html, or markdown (default: csv)
-- `--include-colors`: Include cell background colors
-- `--signal-merge`: Include merged cell information
-- `--preserve-formats`: Preserve number/date formatting
-- `--ignore-colors`: Comma-separated hex colors to ignore
-- `--no-header`: Exclude header row from output
+- `--include-colors`: Include cell background colors as {#RRGGBB} flags
+- `--signal-merge`: Include merged cell information as {MG:XXXXXX} flags
+- `--preserve-formats`: Preserve number/date formatting as displayed in Excel
+- `--ignore-colors`: Comma-separated hex colors to ignore (e.g., "#FFFFFF,#000000")
+- `--add-location`: Add cell coordinates {l:A5} to non-empty cells
+- `--keep-empty-lines`: Preserve empty rows to maintain original row positions
+- `--max-rows`: Maximum number of rows to process (default: 300)
+- `--max-columns`: Maximum number of columns to process (default: 100)
+- `--no-header`: Exclude DataFrame column headers (A, B, C...) from output
 - `--keep-na`: Keep NA values instead of converting to empty strings
 
 ### Python API Options
@@ -215,12 +230,27 @@ from flagged_csv import XlsxConverter, XlsxConverterConfig
 
 # Create converter with custom configuration
 config = XlsxConverterConfig(
-    keep_default_na=False,  # Convert NA to empty strings
-    index=False,            # Don't include row index
-    header=True             # Include column headers
+    keep_default_na=False,    # Convert NA to empty strings
+    index=False,              # Don't include row index
+    header=False,             # Don't include DataFrame column headers (default)
+    keep_empty_lines=False,   # Remove empty rows (default)
+    add_location=False        # Don't add cell coordinates (default)
 )
 
 converter = XlsxConverter(config)
+
+# Convert with additional options
+csv_content = converter.convert_to_csv(
+    'data.xlsx',
+    tab_name='Sheet1',
+    include_colors=True,
+    signal_merge=True,
+    preserve_formats=True,
+    add_location=True,        # Add {l:A5} cell coordinates
+    keep_empty_lines=True,    # Keep empty rows
+    max_rows=500,            # Process up to 500 rows
+    max_columns=50           # Process up to 50 columns
+)
 ```
 
 ## Advanced Usage
@@ -270,6 +300,7 @@ def parse_flagged_csv(file_path):
     # Regular expressions for parsing flags
     color_pattern = r'{#([0-9A-Fa-f]{6})}'
     merge_pattern = r'{MG:(\d{6})}'
+    location_pattern = r'{l:([A-Z]+\d+)}'
     
     # Extract clean values and formatting info
     for row_idx in range(len(df)):
@@ -287,6 +318,12 @@ def parse_flagged_csv(file_path):
             if merge_match:
                 merge_id = merge_match.group(1)
                 print(f"Cell ({row_idx},{col_idx}) is part of merge group {merge_id}")
+            
+            # Extract location
+            location_match = re.search(location_pattern, cell)
+            if location_match:
+                location = location_match.group(1)
+                print(f"Cell ({row_idx},{col_idx}) originally from {location}")
             
             # Get clean value (remove all flags)
             clean_value = re.sub(r'{[^}]+}', '', cell)
@@ -373,6 +410,9 @@ except FileNotFoundError as e:
 - The library uses multiple fallback engines (calamine, openpyxl, xlrd) for maximum compatibility
 - Large files are processed efficiently with streaming where possible
 - Color extraction uses caching to avoid repeated theme color lookups
+- Default limits of 300 rows and 100 columns can be adjusted using `--max-rows` and `--max-columns`
+- Empty rows are automatically removed by default (use `--keep-empty-lines` to preserve them)
+- Trailing empty content is always trimmed to reduce file size
 
 ## Testing
 
@@ -440,8 +480,9 @@ Simply include the contents of `flagged-csv.prompt.md` in your conversation with
 The CSV data uses Flagged CSV format where:
 - {#RRGGBB} indicates cell background color (e.g., {#FF0000} is red)
 - {MG:XXXXXX} indicates merged cells (same ID = same merged group)
+- {l:CellRef} indicates the original Excel cell location (e.g., {l:A5} is cell A5)
 - The value in the merged cell should be applied to the entire range as a whole.
-- Multiple flags can appear together: value{#color}{MG:id}
+- Multiple flags can appear together: value{#color}{MG:id}{l:cell}
 ```
 
 This simple context enables AI to answer questions about:
