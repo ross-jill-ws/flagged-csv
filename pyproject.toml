@@ -1,6 +1,6 @@
 [project]
 name = "flagged-csv"
-version = "0.1.0"
+version = "0.1.1"
 description = "Convert XLSX files to CSV with visual formatting preserved as inline flags"
 authors = [
     {name = "ross", email = "ross.jill.websolution@gmail.com"}
@@ -51,3 +51,9 @@ packages = ["flagged_csv"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+
+[tool.uv]
+dev-dependencies = [
+    "openpyxl>=3.1.5",
+    "pytest>=8.4.1",
+]

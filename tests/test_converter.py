@@ -151,7 +151,7 @@ class TestXlsxConverter:
             xlsx_path = Path(temp_dir) / "test.xlsx"
             create_test_excel(xlsx_path)
             
-            # Convert with custom config
+            # Test with header=False (default)
             config = XlsxConverterConfig(
                 header=False,
                 keep_default_na=True
@@ -159,10 +159,26 @@ class TestXlsxConverter:
             converter = XlsxConverter(config)
             result = converter.convert_to_csv(str(xlsx_path), 'TestSheet')
             
-            # When header=False, we should not output column headers
+            # When header=False, we should not output DataFrame column headers (A, B, C)
+            # but we should still include all rows of data
             lines = result.strip().split('\n')
-            # The data should be present but without headers
-            assert 'Value1' in lines[0]
+            assert len(lines) == 2  # Both rows of data
+            assert 'Header1' in lines[0]
+            assert 'Value1' in lines[1]
+            
+            # Test with header=True
+            config_with_header = XlsxConverterConfig(
+                header=True,
+                keep_default_na=True
+            )
+            converter_with_header = XlsxConverter(config_with_header)
+            result_with_header = converter_with_header.convert_to_csv(str(xlsx_path), 'TestSheet')
+            
+            # When header=True, we should output DataFrame column headers (A, B, C)
+            lines_with_header = result_with_header.strip().split('\n')
+            assert len(lines_with_header) == 3  # Column headers + 2 data rows
+            assert 'A,B,C' in lines_with_header[0]
+            assert 'Header1' in lines_with_header[1]
     
     def test_output_formats(self):
         """Test different output formats."""
@@ -190,6 +206,97 @@ class TestXlsxConverter:
                 output_format='markdown'
             )
             assert '|' in md_result  # Markdown tables use pipes
+    
+    def test_add_location(self):
+        """Test adding location coordinates to cells."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file
+            xlsx_path = Path(temp_dir) / "test_location.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws['A1'] = 'Header1'
+            ws['B1'] = 'Header2'
+            ws['A2'] = 'Value1'
+            ws['B2'] = 100
+            wb.save(xlsx_path)
+            
+            # Convert with location tags
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet',
+                add_location=True
+            )
+            
+            # Check for location tags
+            assert '{l:A1}' in result
+            assert '{l:B1}' in result
+            assert '{l:A2}' in result
+            assert '{l:B2}' in result
+    
+    def test_keep_empty_lines(self):
+        """Test keeping empty rows."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with empty rows
+            xlsx_path = Path(temp_dir) / "test_empty.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws['A1'] = 'Row1'
+            # Row 2 is empty
+            ws['A3'] = 'Row3'
+            # Row 4 is empty
+            ws['A5'] = 'Row5'
+            wb.save(xlsx_path)
+            
+            # Convert without keep_empty_lines (default)
+            converter = XlsxConverter()
+            result_no_empty = converter.convert_to_csv(str(xlsx_path), 'Sheet')
+            lines_no_empty = result_no_empty.strip().split('\n')
+            # Should have 3 data rows (no empty lines)
+            assert len(lines_no_empty) == 3
+            
+            # Convert with keep_empty_lines
+            result_with_empty = converter.convert_to_csv(
+                str(xlsx_path), 'Sheet',
+                keep_empty_lines=True
+            )
+            lines_with_empty = result_with_empty.strip().split('\n')
+            # Should have 5 rows (including empty lines)
+            assert len(lines_with_empty) == 5
+    
+    def test_max_rows_columns(self):
+        """Test max rows and columns limits."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with many rows and columns
+            xlsx_path = Path(temp_dir) / "test_limits.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            
+            # Create 10x10 grid
+            for row in range(1, 11):
+                for col in range(1, 11):
+                    ws.cell(row=row, column=col, value=f"R{row}C{col}")
+            
+            wb.save(xlsx_path)
+            
+            # Convert with limits
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet',
+                max_rows=3,
+                max_columns=4
+            )
+            
+            # Parse result
+            lines = result.strip().split('\n')
+            # Should have only 3 rows
+            assert len(lines) == 3
+            
+            # Each row should have only 4 columns
+            for line in lines:
+                cells = line.split(',')
+                assert len(cells) == 4
 
 
 if __name__ == '__main__':

@@ -30,8 +30,16 @@ class XlsxConverterConfig(BaseModel):
         description="Whether to include index in CSV output"
     )
     header: bool = Field(
-        default=True,
+        default=False,
         description="Whether to include header in CSV output"
+    )
+    keep_empty_lines: bool = Field(
+        default=False,
+        description="Whether to preserve empty rows to maintain original row positions"
+    )
+    add_location: bool = Field(
+        default=False,
+        description="Whether to add location coordinates {l:A5} to non-empty cells"
     )
 
 
@@ -79,7 +87,11 @@ class XlsxConverter:
         include_colors: bool = False,
         signal_merge: bool = False,
         preserve_formats: bool = False,
-        ignore_colors: Optional[str] = None
+        ignore_colors: Optional[str] = None,
+        keep_empty_lines: Optional[bool] = None,
+        add_location: Optional[bool] = None,
+        max_rows: Optional[int] = None,
+        max_columns: Optional[int] = None
     ) -> str:
         """
         Convert an XLSX file to CSV with optional formatting flags.
@@ -88,10 +100,14 @@ class XlsxConverter:
             input_file_path: Path to the XLSX file
             tab_name: Name of the sheet to convert
             output_format: Format to convert to (csv, html, or markdown)
-            include_colors: Whether to include cell background colors as {{#RRGGBB}} flags
-            signal_merge: Whether to include merge information as {{MG:XXXXXX}} flags
+            include_colors: Whether to include cell background colors as {#RRGGBB} flags
+            signal_merge: Whether to include merge information as {MG:XXXXXX} flags
             preserve_formats: Whether to preserve cell formatting (e.g., $500 instead of 500)
             ignore_colors: Comma-separated string of hex colors to ignore (e.g., "#FFFFFF,#000000")
+            keep_empty_lines: Whether to preserve empty rows (overrides config if provided)
+            add_location: Whether to add location coordinates {l:A5} to cells (overrides config if provided)
+            max_rows: Maximum number of rows to process (default: 300)
+            max_columns: Maximum number of columns to process (default: 100)
             
         Returns:
             Formatted string in the requested format
@@ -108,15 +124,26 @@ class XlsxConverter:
             raise ValueError(f"File must be an Excel file (xlsx/xls), got: {path.suffix}")
         
         try:
+            # Determine feature flags
+            should_keep_empty_lines = keep_empty_lines if keep_empty_lines is not None else self.config.keep_empty_lines
+            should_add_location = add_location if add_location is not None else self.config.add_location
+            
+            # Set default max rows and columns
+            max_rows = max_rows if max_rows is not None else 300
+            max_columns = max_columns if max_columns is not None else 100
+            
             # Determine whether to use special formatting
-            if include_colors or signal_merge or preserve_formats:
+            if include_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location:
                 df = self._read_excel_with_formatting(
                     input_file_path, tab_name, include_colors, 
-                    signal_merge, preserve_formats, ignore_colors
+                    signal_merge, preserve_formats, ignore_colors,
+                    should_keep_empty_lines, should_add_location,
+                    max_rows, max_columns
                 )
             else:
                 df = self._read_excel_with_fallback(
-                    input_file_path, tab_name, self.config.keep_default_na
+                    input_file_path, tab_name, self.config.keep_default_na,
+                    max_rows, max_columns, should_keep_empty_lines
                 )
             
             # Convert to requested format
@@ -132,28 +159,73 @@ class XlsxConverter:
                 raise ValueError(f"Sheet '{tab_name}' not found in {path.name}")
             raise
     
-    def _read_excel_with_fallback(self, file_path: str, sheet_name: str, keep_default_na: bool) -> pd.DataFrame:
-        """Read Excel file with multiple engine fallbacks."""
+    def _read_excel_with_fallback(self, file_path: str, sheet_name: str, keep_default_na: bool, max_rows: int = 300, max_columns: int = 100, keep_empty_lines: bool = False) -> pd.DataFrame:
+        """Read Excel file with multiple engine fallbacks.
+        
+        Args:
+            file_path: Path to the Excel file
+            sheet_name: Name of the sheet to read
+            keep_default_na: Whether to keep default NA values
+            max_rows: Maximum number of rows to read
+            max_columns: Maximum number of columns to read
+            keep_empty_lines: Whether to keep empty rows
+            
+        Returns:
+            pd.DataFrame: The loaded dataframe
+        """
         exceptions = []
         
         # Try calamine engine first
         try:
-            return pd.read_excel(file_path, sheet_name=sheet_name, 
-                               keep_default_na=keep_default_na, engine='calamine')
+            df = pd.read_excel(file_path, sheet_name=sheet_name, 
+                               keep_default_na=keep_default_na, engine='calamine', nrows=max_rows, header=None)
+            # Limit columns
+            if len(df.columns) > max_columns:
+                df = df.iloc[:, :max_columns]
+            # Rename columns to Excel-style letters
+            df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
+            # Remove empty rows if needed
+            if not keep_empty_lines:
+                df = self._remove_empty_rows(df)
+            # Always trim trailing empty rows
+            df = self._trim_trailing_empty_rows(df)
+            return df
         except Exception as e:
             exceptions.append(f"Calamine: {e}")
         
         # Try openpyxl
         try:
-            return pd.read_excel(file_path, sheet_name=sheet_name, 
-                               keep_default_na=keep_default_na, engine='openpyxl')
+            df = pd.read_excel(file_path, sheet_name=sheet_name, 
+                               keep_default_na=keep_default_na, engine='openpyxl', nrows=max_rows, header=None)
+            # Limit columns
+            if len(df.columns) > max_columns:
+                df = df.iloc[:, :max_columns]
+            # Rename columns to Excel-style letters
+            df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
+            # Remove empty rows if needed
+            if not keep_empty_lines:
+                df = self._remove_empty_rows(df)
+            # Always trim trailing empty rows
+            df = self._trim_trailing_empty_rows(df)
+            return df
         except Exception as e:
             exceptions.append(f"Openpyxl: {e}")
         
         # Try xlrd
         try:
-            return pd.read_excel(file_path, sheet_name=sheet_name, 
-                               keep_default_na=keep_default_na, engine='xlrd')
+            df = pd.read_excel(file_path, sheet_name=sheet_name, 
+                               keep_default_na=keep_default_na, engine='xlrd', nrows=max_rows, header=None)
+            # Limit columns
+            if len(df.columns) > max_columns:
+                df = df.iloc[:, :max_columns]
+            # Rename columns to Excel-style letters
+            df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
+            # Remove empty rows if needed
+            if not keep_empty_lines:
+                df = self._remove_empty_rows(df)
+            # Always trim trailing empty rows
+            df = self._trim_trailing_empty_rows(df)
+            return df
         except Exception as e:
             exceptions.append(f"Xlrd: {e}")
         
@@ -164,13 +236,20 @@ class XlsxConverter:
             ws = wb[sheet_name]
             
             data = []
-            for row in ws.iter_rows(values_only=True):
+            for row in ws.iter_rows(values_only=True, max_row=max_rows, max_col=max_columns):
                 data.append(row)
             
             if data:
-                df = pd.DataFrame(data[1:], columns=data[0])
+                df = pd.DataFrame(data)
+                # Rename columns to Excel-style letters
+                df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
                 if not keep_default_na:
                     df = df.fillna('')
+                # Remove empty rows if needed
+                if not keep_empty_lines:
+                    df = self._remove_empty_rows(df)
+                # Always trim trailing empty rows
+                df = self._trim_trailing_empty_rows(df)
                 return df
             return pd.DataFrame()
             
@@ -251,9 +330,35 @@ class XlsxConverter:
         include_colors: bool = True,
         signal_merge: bool = False,
         preserve_formats: bool = False,
-        ignore_colors: Optional[str] = None
+        ignore_colors: Optional[str] = None,
+        keep_empty_lines: bool = False,
+        add_location: bool = False,
+        max_rows: int = 300,
+        max_columns: int = 100
     ) -> pd.DataFrame:
-        """Read Excel file and extract formatting information."""
+        """Read Excel file and extract formatting information.
+        
+        This implementation preserves the exact row/column structure and appends
+        formatting information directly to cell values using:
+        - Colors: value{#color}
+        - Merged cells: value{MG:xxxxx} where xxxxx is a unique identifier
+        - Location: value{l:A5} where A5 is the Excel coordinate
+        
+        Args:
+            file_path: Path to the Excel file
+            sheet_name: Name of the sheet to read
+            include_colors: Whether to include color information
+            signal_merge: Whether to include merge information
+            preserve_formats: Whether to preserve cell formatting
+            ignore_colors: Comma-separated string of hex colors to ignore
+            keep_empty_lines: Whether to preserve empty rows to maintain original row positions
+            add_location: Whether to add location coordinates to non-empty cells
+            max_rows: Maximum number of rows to process
+            max_columns: Maximum number of columns to process
+            
+        Returns:
+            pd.DataFrame: DataFrame with original structure and formatting embedded in values
+        """
         # Parse colors to ignore
         colors_to_ignore = set()
         if ignore_colors:
@@ -276,15 +381,18 @@ class XlsxConverter:
         merge_map = {}
         if signal_merge and ws.merged_cells:
             for merged_range in ws.merged_cells.ranges:
-                merge_id = str(random.randint(100000, 999999))
-                for row in range(merged_range.min_row, merged_range.max_row + 1):
-                    for col in range(merged_range.min_col, merged_range.max_col + 1):
-                        merge_map[(row, col)] = merge_id
+                # Only process merged cells within our limits
+                if merged_range.min_row <= max_rows and merged_range.min_col <= max_columns:
+                    merge_id = str(random.randint(100000, 999999))
+                    # Mark all cells in the merged range with the same ID (within limits)
+                    for row in range(merged_range.min_row, min(merged_range.max_row + 1, max_rows + 1)):
+                        for col in range(merged_range.min_col, min(merged_range.max_col + 1, max_columns + 1)):
+                            merge_map[(row, col)] = merge_id
         
         # Process all cells
         processed_data = []
         
-        for row_idx, row in enumerate(ws.iter_rows(), 1):
+        for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, max_col=max_columns), 1):
             row_data = []
             has_content = False
             
@@ -316,6 +424,12 @@ class XlsxConverter:
                     merge_id = merge_map[(cell.row, cell.column)]
                     formatting_parts.append(f"{{MG:{merge_id}}}")
                 
+                # Add location if requested and cell is non-empty (has value, color, or merge flag)
+                if add_location and (value is not None or formatting_parts):
+                    column_letter = get_column_letter(cell.column)
+                    location_tag = f"{{l:{column_letter}{cell.row}}}"
+                    formatting_parts.append(location_tag)
+                
                 # Combine value and formatting
                 if value is not None:
                     cell_value = str(value) + ''.join(formatting_parts)
@@ -326,26 +440,32 @@ class XlsxConverter:
                 
                 row_data.append(cell_value)
             
-            if has_content:
+            # keep_empty_lines is useful if we want to preserve the original row positions
+            if has_content or keep_empty_lines:
                 processed_data.append(row_data)
         
         if not processed_data:
             return pd.DataFrame()
         
         # Create DataFrame
-        num_cols = ws.max_column
-        headers = [get_column_letter(i) for i in range(1, num_cols + 1)]
-        
         # Ensure all rows have same number of columns
-        max_cols = max(len(row) for row in processed_data)
+        max_cols = max(len(row) for row in processed_data) if processed_data else 0
         for row in processed_data:
             while len(row) < max_cols:
                 row.append(None)
         
-        df = pd.DataFrame(processed_data, columns=headers[:max_cols])
+        # Create DataFrame with column letters as headers (A, B, C, ...)
+        # This provides meaningful column names for CSV output
+        column_names = [get_column_letter(i) for i in range(1, max_cols + 1)]
+        df = pd.DataFrame(processed_data, columns=column_names)
         
+        # Fill NaN values if needed
         if not self.config.keep_default_na:
             df = df.fillna('')
+        
+        # Always trim trailing empty rows (even when keep_empty_lines=True)
+        # keep_empty_lines only preserves empty rows within the content area
+        df = self._trim_trailing_empty_rows(df)
         
         return df
     
@@ -403,3 +523,79 @@ class XlsxConverter:
             pass
         
         return None
+    
+    def _remove_empty_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove rows that are entirely empty or contain only empty strings.
+        
+        Args:
+            df: DataFrame to filter
+            
+        Returns:
+            pd.DataFrame: DataFrame with empty rows removed
+        """
+        if df.empty:
+            return df
+        
+        # Filter out rows where all values are either NaN or empty strings
+        mask = df.apply(lambda row: any(pd.notna(val) and str(val).strip() != '' for val in row), axis=1)
+        return df[mask]
+    
+    def _trim_trailing_empty_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Trim trailing empty rows and columns from DataFrame.
+        
+        This is always applied, even when keep_empty_lines=True, because
+        keep_empty_lines is meant to preserve empty rows within the content area,
+        not trailing empty rows.
+        
+        Args:
+            df: DataFrame to trim
+            
+        Returns:
+            pd.DataFrame: DataFrame with trailing empty rows and columns removed
+        """
+        if df.empty:
+            return df
+        
+        # Find the last non-empty row by checking from the end
+        last_non_empty_row = -1
+        for idx in range(len(df) - 1, -1, -1):
+            row = df.iloc[idx]
+            # Check if row has any non-empty values
+            has_content = False
+            for val in row:
+                if pd.notna(val) and str(val).strip() != '':
+                    has_content = True
+                    break
+            
+            if has_content:
+                last_non_empty_row = idx
+                break
+        
+        # If all rows are empty, return empty DataFrame
+        if last_non_empty_row == -1:
+            return pd.DataFrame(columns=df.columns)
+        
+        # Trim to last non-empty row
+        df = df.iloc[:last_non_empty_row + 1]
+        
+        # Also find the last non-empty column
+        last_non_empty_col = -1
+        for col_idx in range(len(df.columns) - 1, -1, -1):
+            col = df.iloc[:, col_idx]
+            # Check if column has any non-empty values
+            has_content = False
+            for val in col:
+                if pd.notna(val) and str(val).strip() != '':
+                    has_content = True
+                    break
+            
+            if has_content:
+                last_non_empty_col = col_idx
+                break
+        
+        # If all columns are empty, return DataFrame with no columns
+        if last_non_empty_col == -1:
+            return pd.DataFrame()
+        
+        # Return DataFrame trimmed to last non-empty column
+        return df.iloc[:, :last_non_empty_col + 1]

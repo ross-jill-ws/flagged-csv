@@ -87,3 +87,5 @@ uv.lock
 .claude/settings.local.json
 PYPI_UPLOAD_GUIDE.md
 PYPI_UPDATE_GUIDE.md
+
+test-install
