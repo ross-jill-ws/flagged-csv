@@ -85,9 +85,13 @@ class XlsxConverter:
         tab_name: str,
         output_format: Literal["csv", "html", "markdown"] = "csv",
         include_colors: bool = False,
+        include_bg_colors: bool = False,
+        include_fg_colors: bool = False,
         signal_merge: bool = False,
         preserve_formats: bool = False,
         ignore_colors: Optional[str] = None,
+        ignore_bg_colors: Optional[str] = None,
+        ignore_fg_colors: Optional[str] = None,
         keep_empty_lines: Optional[bool] = None,
         add_location: Optional[bool] = None,
         max_rows: Optional[int] = None,
@@ -100,10 +104,14 @@ class XlsxConverter:
             input_file_path: Path to the XLSX file
             tab_name: Name of the sheet to convert
             output_format: Format to convert to (csv, html, or markdown)
-            include_colors: Whether to include cell background colors as {#RRGGBB} flags
+            include_colors: Whether to include both foreground and background colors
+            include_bg_colors: Whether to include background colors as {bc:#RRGGBB} or {#RRGGBB} flags
+            include_fg_colors: Whether to include foreground colors as {fc:#RRGGBB} flags
             signal_merge: Whether to include merge information as {MG:XXXXXX} flags
             preserve_formats: Whether to preserve cell formatting (e.g., $500 instead of 500)
-            ignore_colors: Comma-separated string of hex colors to ignore (e.g., "#FFFFFF,#000000")
+            ignore_colors: Comma-separated hex colors to ignore for both fg and bg (applies defaults)
+            ignore_bg_colors: Comma-separated hex colors to ignore for background (default: "#FFFFFF")
+            ignore_fg_colors: Comma-separated hex colors to ignore for foreground (default: "#000000")
             keep_empty_lines: Whether to preserve empty rows (overrides config if provided)
             add_location: Whether to add location coordinates {l:A5} to cells (overrides config if provided)
             max_rows: Maximum number of rows to process (default: 300)
@@ -132,11 +140,43 @@ class XlsxConverter:
             max_rows = max_rows if max_rows is not None else 300
             max_columns = max_columns if max_columns is not None else 100
             
+            # Handle include_colors as master flag for both fg and bg
+            if include_colors:
+                include_bg_colors = True
+                include_fg_colors = True
+            
+            # Process ignore color lists with defaults
+            bg_ignore_list = set()
+            fg_ignore_list = set()
+            
+            # If ignore_colors is specified, it overrides individual lists
+            if ignore_colors is not None:
+                # Parse the combined ignore list
+                colors = [c.strip().upper().replace('#', '') for c in ignore_colors.split(',') if c.strip()]
+                bg_ignore_list.update(colors)
+                fg_ignore_list.update(colors)
+                # Also apply defaults when using ignore_colors
+                bg_ignore_list.add('FFFFFF')  # Default: ignore white backgrounds
+                fg_ignore_list.add('000000')  # Default: ignore black foreground
+            else:
+                # Use individual ignore lists or defaults
+                if ignore_bg_colors is not None:
+                    bg_ignore_list.update(c.strip().upper().replace('#', '') for c in ignore_bg_colors.split(',') if c.strip())
+                else:
+                    bg_ignore_list.add('FFFFFF')  # Default: ignore white backgrounds
+                
+                if ignore_fg_colors is not None:
+                    fg_ignore_list.update(c.strip().upper().replace('#', '') for c in ignore_fg_colors.split(',') if c.strip())
+                else:
+                    fg_ignore_list.add('000000')  # Default: ignore black foreground
+            
             # Determine whether to use special formatting
-            if include_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location:
+            if include_bg_colors or include_fg_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location:
                 df = self._read_excel_with_formatting(
-                    input_file_path, tab_name, include_colors, 
-                    signal_merge, preserve_formats, ignore_colors,
+                    input_file_path, tab_name, 
+                    include_bg_colors, include_fg_colors,
+                    signal_merge, preserve_formats, 
+                    bg_ignore_list, fg_ignore_list,
                     should_keep_empty_lines, should_add_location,
                     max_rows, max_columns
                 )
@@ -327,10 +367,12 @@ class XlsxConverter:
         self,
         file_path: str,
         sheet_name: str,
-        include_colors: bool = True,
+        include_bg_colors: bool = False,
+        include_fg_colors: bool = False,
         signal_merge: bool = False,
         preserve_formats: bool = False,
-        ignore_colors: Optional[str] = None,
+        bg_ignore_list: set = None,
+        fg_ignore_list: set = None,
         keep_empty_lines: bool = False,
         add_location: bool = False,
         max_rows: int = 300,
@@ -347,10 +389,12 @@ class XlsxConverter:
         Args:
             file_path: Path to the Excel file
             sheet_name: Name of the sheet to read
-            include_colors: Whether to include color information
+            include_bg_colors: Whether to include background color information
+            include_fg_colors: Whether to include foreground color information
             signal_merge: Whether to include merge information
             preserve_formats: Whether to preserve cell formatting
-            ignore_colors: Comma-separated string of hex colors to ignore
+            bg_ignore_list: Set of background colors to ignore (hex without #)
+            fg_ignore_list: Set of foreground colors to ignore (hex without #)
             keep_empty_lines: Whether to preserve empty rows to maintain original row positions
             add_location: Whether to add location coordinates to non-empty cells
             max_rows: Maximum number of rows to process
@@ -359,14 +403,9 @@ class XlsxConverter:
         Returns:
             pd.DataFrame: DataFrame with original structure and formatting embedded in values
         """
-        # Parse colors to ignore
-        colors_to_ignore = set()
-        if ignore_colors:
-            for color in ignore_colors.split(','):
-                color = color.strip().upper()
-                if color.startswith('#'):
-                    color = color[1:]
-                colors_to_ignore.add(color)
+        # Use provided ignore lists or empty sets
+        bg_ignore_list = bg_ignore_list or set()
+        fg_ignore_list = fg_ignore_list or set()
         
         wb = load_workbook(file_path, data_only=True)
         if sheet_name not in wb.sheetnames:
@@ -411,13 +450,36 @@ class XlsxConverter:
                 
                 formatting_parts = []
                 
-                # Extract color if requested
-                if include_colors:
-                    color_hex = self._extract_cell_color(cell, file_path)
-                    if color_hex:
-                        color_to_check = color_hex[1:] if color_hex.startswith('#') else color_hex
-                        if color_to_check.upper() not in colors_to_ignore:
-                            formatting_parts.append(f"{{{color_hex}}}")
+                # Extract background color if requested
+                has_background = False
+                if include_bg_colors:
+                    bg_color_hex = self._extract_cell_bg_color(cell, file_path)
+                    if bg_color_hex:
+                        color_to_check = bg_color_hex[1:] if bg_color_hex.startswith('#') else bg_color_hex
+                        if color_to_check.upper() not in bg_ignore_list:
+                            # Use backward-compatible {#RRGGBB} format by default
+                            formatting_parts.append(f"{{{bg_color_hex}}}")
+                            has_background = True
+                
+                # Extract foreground color if requested and cell has content
+                if include_fg_colors and value is not None:
+                    fg_color_hex = self._extract_cell_fg_color(cell, file_path)
+                    if fg_color_hex:
+                        color_to_check = fg_color_hex[1:] if fg_color_hex.startswith('#') else fg_color_hex
+                        if color_to_check.upper() not in fg_ignore_list:
+                            # Only include black foreground color if there's also a background color (for contrast)
+                            if color_to_check.upper() == '000000':
+                                # Check if this cell has a background color
+                                if not has_background and not include_bg_colors:
+                                    # Need to check for background if we haven't already
+                                    bg_color = self._extract_cell_bg_color(cell, file_path)
+                                    has_background = bg_color is not None
+                                # Only include black text if there's a background
+                                if has_background:
+                                    formatting_parts.append(f"{{fc:{fg_color_hex}}}")
+                            else:
+                                # Non-black colors are always included
+                                formatting_parts.append(f"{{fc:{fg_color_hex}}}")
                 
                 # Add merge info if requested
                 if signal_merge and (cell.row, cell.column) in merge_map:
@@ -469,8 +531,57 @@ class XlsxConverter:
         
         return df
     
-    def _extract_cell_color(self, cell, file_path: str) -> Optional[str]:
-        """Extract color from a cell."""
+    def _extract_cell_fg_color(self, cell, file_path: str) -> Optional[str]:
+        """Extract foreground (font) color from a cell."""
+        if not cell.font or not cell.font.color:
+            return None
+        
+        color = cell.font.color
+        
+        try:
+            if hasattr(color, 'type'):
+                if color.type == 'theme' and hasattr(color, 'theme') and color.theme is not None:
+                    # Load theme colors
+                    if self._cached_theme_colors is None:
+                        self._cached_theme_colors = self._extract_theme_colors(file_path)
+                    
+                    # Default theme colors if extraction fails
+                    if not self._cached_theme_colors:
+                        self._cached_theme_colors = {
+                            0: "FFFFFF", 1: "000000", 2: "E7E6E6", 3: "44546A",
+                            4: "5B9BD5", 5: "ED7D31", 6: "A5A5A5", 7: "FFC000",
+                            8: "4472C4", 9: "70AD47"
+                        }
+                    
+                    base_color = self._cached_theme_colors.get(color.theme, "000000")
+                    
+                    # Apply tint if present
+                    tint = getattr(color, 'tint', 0)
+                    if tint and tint != 0:
+                        final_color = self._apply_tint(base_color, tint)
+                        return f"#{final_color}"
+                    return f"#{base_color}"
+                
+                elif color.type == 'rgb' and hasattr(color, 'rgb'):
+                    rgb = color.rgb
+                    if rgb and isinstance(rgb, str) and len(rgb) >= 6:
+                        # Extract last 6 characters (ignore alpha channel if present)
+                        color_hex = rgb[-6:]
+                        return f"#{color_hex}"
+            
+            # Try direct RGB attribute
+            if hasattr(color, 'rgb') and color.rgb:
+                rgb = color.rgb
+                if isinstance(rgb, str) and len(rgb) >= 6:
+                    color_hex = rgb[-6:]
+                    return f"#{color_hex}"
+        except:
+            pass
+        
+        return None
+    
+    def _extract_cell_bg_color(self, cell, file_path: str) -> Optional[str]:
+        """Extract background color from a cell."""
         if not cell.fill or cell.fill.patternType != 'solid':
             return None
         

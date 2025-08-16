@@ -1,4 +1,4 @@
-You (the LLM) will receive CSV text in which every cell may include *flags* that capture visual cues (background colour, merged‑cell structure, and cell location) from the source spreadsheet.
+You (the LLM) will receive CSV text in which every cell may include *flags* that capture visual cues (background colour, foreground colour, merged‑cell structure, and cell location) from the source spreadsheet.
 Parse and reason about these flags exactly as described below.
 
 ---
@@ -6,11 +6,12 @@ Parse and reason about these flags exactly as described below.
 #### 1  Flag grammar
 
 * Every flag is appended to the cell's raw value and wrapped in `{ … }`.
-* Multiple flags may follow the same value with **no spaces** (e.g. `100{#AA0000}{MG:764455}{l:B5}`).
+* Multiple flags may follow the same value with **no spaces** (e.g. `100{#FFFF00}{fc:#FF0000}{MG:764455}{l:B5}`).
 
 | Flag            | Purpose                                                | Syntax detail                                                                                                                                                                                                                                                 |
 | --------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Colour flag** | Cell background colour                                 | `{#XXXXXX}` where `XXXXXX` is a hex RGB code                                                                                                                                                                |
+| **Background colour** | Cell background colour                           | `{#XXXXXX}` or `{bc:#XXXXXX}` where `XXXXXX` is a hex RGB code.<br>The `{#XXXXXX}` format is backward-compatible.                                                           |
+| **Foreground colour** | Cell text/font colour                           | `{fc:#XXXXXX}` where `XXXXXX` is a hex RGB code                                                                                                                              |
 | **Merge flag**  | Identifies cells that were one merged cell in the XLSX | `{MG:YYYYYY}` where `YYYYYY` is a 6‑digit ID.<br>All cells sharing the same ID belong to the same merged block (horizontal, vertical, or both).|
 | **Location flag** | Original Excel cell coordinate                       | `{l:CellRef}` where `CellRef` is the Excel cell reference (e.g., `A1`, `B5`, `AA12`).<br>Indicates the cell's original position in the spreadsheet.|
 
@@ -19,10 +20,11 @@ Parse and reason about these flags exactly as described below.
 #### 2  Parsing rules
 
 1. **Value extraction** – Strip all flags to obtain the cell's actual text or number.
-2. **Background Color** – A Cell with {#RRGGBB} flag will be treated as a cell with background color #RRGGBB.
-3. **Merged cells** – Collapse every set of identical `MG:` IDs into a single virtual cell spanning the full rectangle they occupy.
-4. **Location tracking** – A cell with {l:A5} flag indicates it originally came from cell A5 in the Excel spreadsheet.
-5. Cells without {...} flags will be treated a normal csv cell without formats.
+2. **Background Color** – A cell with {#RRGGBB} or {bc:#RRGGBB} flag has background color #RRGGBB.
+3. **Foreground Color** – A cell with {fc:#RRGGBB} flag has text/font color #RRGGBB.
+4. **Merged cells** – Collapse every set of identical `MG:` IDs into a single virtual cell spanning the full rectangle they occupy.
+5. **Location tracking** – A cell with {l:A5} flag indicates it originally came from cell A5 in the Excel spreadsheet.
+6. Cells without {...} flags will be treated as normal csv cells without formats.
 
 ---
 
@@ -75,5 +77,22 @@ Tablets{l:A4}{#FFFF00},300{l:B4},350{l:C4},400{l:D4},450{l:E4},1500{l:F4}{#00FF0
 - Green-highlighted totals are in column F (cells F2, F3, F4)
 - You can reference specific values: "The value in cell C3 is 600 (Phones Q2 sales)"
 - You can answer: "What is the Q3 value for Tablets?" → Look at cell D4 → 400
+
+##### Example 3: With foreground and background colors
+
+```csv
+Status{l:A1}{fc:#FFFFFF}{#000000},Priority{l:B1}{fc:#FFFFFF}{#000000},Task{l:C1}{fc:#FFFFFF}{#000000}
+Complete{l:A2}{fc:#00FF00},High{l:B2}{fc:#FF0000}{#FFFF00},Deploy to production{l:C2}
+In Progress{l:A3}{fc:#FFA500},Medium{l:B3}{fc:#FFA500},Code review{l:C3}
+Pending{l:A4}{fc:#FF0000},Low{l:B4}{fc:#0000FF},Write documentation{l:C4}
+```
+
+*Interpretation*
+
+- Header row (row 1): White text on black background
+- Status column uses colored text: green for Complete, orange for In Progress, red for Pending
+- Priority "High" has red text on yellow background for emphasis
+- Different priority levels have different text colors
+- You can identify cells with specific color combinations
 
 Keep these rules in mind whenever the user supplies a **Flagged CSV**.

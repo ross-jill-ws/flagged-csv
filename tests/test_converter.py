@@ -6,7 +6,7 @@ import pytest
 import tempfile
 from pathlib import Path
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Font
 
 from flagged_csv import XlsxConverter, XlsxConverterConfig
 
@@ -263,6 +263,141 @@ class TestXlsxConverter:
             lines_with_empty = result_with_empty.strip().split('\n')
             # Should have 5 rows (including empty lines)
             assert len(lines_with_empty) == 5
+    
+    def test_black_text_contrast(self):
+        """Test that black text is only included when there's a background color for contrast."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with various text/background combinations
+            xlsx_path = Path(temp_dir) / "test_contrast.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            
+            # White text on dark background
+            ws['A1'] = 'White on Dark'
+            ws['A1'].font = Font(color='FFFFFF')
+            ws['A1'].fill = PatternFill(start_color='8E1C02', end_color='8E1C02', fill_type='solid')
+            
+            # Black text on light background
+            ws['B1'] = 'Black on Light'
+            ws['B1'].font = Font(color='000000')
+            ws['B1'].fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+            
+            # Black text with no background (should NOT include fc:#000000)
+            ws['A2'] = 'Plain Black'
+            ws['A2'].font = Font(color='000000')
+            
+            # Colored text with no background (should include the color)
+            ws['B2'] = 'Red Text'
+            ws['B2'].font = Font(color='FF0000')
+            
+            wb.save(xlsx_path)
+            
+            # Test 1: With default ignore lists (black fg ignored by default)
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet',
+                include_colors=True  # Include both fg and bg
+            )
+            
+            lines = result.strip().split('\n')
+            
+            # Check white on dark background
+            assert '{#8E1C02}' in lines[0]  # Dark background
+            assert '{fc:#FFFFFF}' in lines[0]  # White text
+            
+            # Check black on light background (black text is ignored by default)
+            assert '{#FFFF00}' in lines[0]  # Yellow background
+            assert '{fc:#000000}' not in lines[0]  # Black text ignored by default
+            
+            # Check plain black text (no background)
+            assert 'Plain Black' in lines[1]
+            assert '{fc:#000000}' not in lines[1]  # Black text ignored by default
+            
+            # Check colored text (no background)
+            assert 'Red Text' in lines[1]
+            assert '{fc:#FF0000}' in lines[1]  # Red text should be included
+            
+            # Test 2: Without ignoring black text (to test contrast logic)
+            result2 = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet',
+                include_colors=True,
+                ignore_fg_colors=''  # Don't ignore any foreground colors
+            )
+            
+            lines2 = result2.strip().split('\n')
+            
+            # Now black text on background should be included
+            assert '{#FFFF00}' in lines2[0]  # Yellow background
+            assert '{fc:#000000}' in lines2[0]  # Black text now included with background
+            
+            # Plain black text (no background) should still not be included due to contrast logic
+            assert 'Plain Black' in lines2[1]
+            assert '{fc:#000000}' not in lines2[1]  # Black text without background still not included
+    
+    def test_ignore_colors_defaults(self):
+        """Test default ignore colors and custom ignore lists."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with various color combinations
+            xlsx_path = Path(temp_dir) / "test_ignore.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            
+            # White background with black text (should be ignored by default)
+            ws['A1'] = 'Normal'
+            ws['A1'].fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
+            ws['A1'].font = Font(color='000000')
+            
+            # Colored background with colored text
+            ws['B1'] = 'Colored'
+            ws['B1'].fill = PatternFill(start_color='FF0000', end_color='FF0000', fill_type='solid')
+            ws['B1'].font = Font(color='00FF00')
+            
+            wb.save(xlsx_path)
+            
+            converter = XlsxConverter()
+            
+            # Test 1: With defaults (ignore white bg and black fg)
+            result = converter.convert_to_csv(
+                str(xlsx_path), 'Sheet',
+                include_colors=True  # Both fg and bg
+            )
+            lines = result.strip().split('\n')
+            # Normal cell should have no colors (white bg and black fg ignored)
+            assert 'Normal,' in lines[0] or ',Normal' in lines[0]
+            assert '{#FFFFFF}' not in lines[0]  # White bg ignored
+            assert '{fc:#000000}' not in lines[0]  # Black fg ignored
+            # Colored cell should have both colors
+            assert '{#FF0000}' in lines[0]  # Red bg included
+            assert '{fc:#00FF00}' in lines[0]  # Green fg included
+            
+            # Test 2: Override with empty ignore lists
+            result = converter.convert_to_csv(
+                str(xlsx_path), 'Sheet',
+                include_colors=True,
+                ignore_bg_colors='',  # Don't ignore any bg colors
+                ignore_fg_colors=''   # Don't ignore any fg colors
+            )
+            lines = result.strip().split('\n')
+            # Now white bg and black fg should be included
+            assert '{#FFFFFF}' in lines[0]  # White bg now included
+            assert '{fc:#000000}' in lines[0]  # Black fg now included
+            
+            # Test 3: Custom ignore lists
+            result = converter.convert_to_csv(
+                str(xlsx_path), 'Sheet',
+                include_colors=True,
+                ignore_bg_colors='#FF0000',  # Ignore red bg
+                ignore_fg_colors='#00FF00'   # Ignore green fg
+            )
+            lines = result.strip().split('\n')
+            # Red bg and green fg should be ignored
+            assert '{#FF0000}' not in lines[0]  # Red bg ignored
+            assert '{fc:#00FF00}' not in lines[0]  # Green fg ignored
+            # White bg and black fg should be included (not in ignore list)
+            assert '{#FFFFFF}' in lines[0]  # White bg included
+            assert '{fc:#000000}' in lines[0]  # Black fg included (with background)
     
     def test_max_rows_columns(self):
         """Test max rows and columns limits."""

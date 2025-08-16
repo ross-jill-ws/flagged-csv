@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-08-16
+
+### Added
+- Foreground color support with `{fc:#RRGGBB}` syntax for text/font colors
+- Alternative background color syntax `{bc:#RRGGBB}` (backward-compatible with `{#RRGGBB}`)
+- Intelligent black text contrast logic - only shows `{fc:#000000}` when background exists
+- Separate ignore lists for foreground and background colors with sensible defaults
+- New CLI options for granular color control:
+  - `--include-colors`: Include both foreground and background colors
+  - `--include-bg-colors`: Include background colors only
+  - `--include-fg-colors`: Include foreground colors only
+  - `--ignore-bg-colors`: Ignore specific background colors (default: #FFFFFF)
+  - `--ignore-fg-colors`: Ignore specific foreground colors (default: #000000)
+- Comprehensive tests for color handling and ignore defaults
+
+### Changed
+- `--ignore-colors` now applies default ignore lists for both foreground (#000000) and background (#FFFFFF)
+- Color extraction logic optimized to only process foreground colors for non-empty cells
+- Documentation updated with new color syntax examples
+
+### Fixed
+- Black text no longer appears unnecessarily on cells without backgrounds
+- Color ignore functionality now properly handles separate foreground and background lists
+
 ## [0.1.1] - 2025-08-15
 
 ### Added

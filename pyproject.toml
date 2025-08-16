@@ -1,6 +1,6 @@
 [project]
 name = "flagged-csv"
-version = "0.1.1"
+version = "0.1.2"
 description = "Convert XLSX files to CSV with visual formatting preserved as inline flags"
 authors = [
     {name = "ross", email = "ross.jill.websolution@gmail.com"}

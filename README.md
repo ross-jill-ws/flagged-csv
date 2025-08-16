@@ -66,9 +66,11 @@ This enables AI to understand:
 
 Flagged CSV is a Python library and command-line tool that converts Excel (XLSX) files to CSV format while preserving important visual information that would normally be lost in conversion:
 
-- **Cell background colors** - Preserved as `{#RRGGBB}` flags
+- **Cell background colors** - Preserved as `{#RRGGBB}` or `{bc:#RRGGBB}` flags
+- **Cell foreground colors** - Preserved as `{fc:#RRGGBB}` flags
 - **Merged cells** - Marked with `{MG:XXXXXX}` flags where XXXXXX is a unique identifier
 - **Cell formatting** - Currency symbols, number formats, dates preserved as displayed in Excel
+- **Cell locations** - Original Excel coordinates preserved as `{l:CellRef}` flags
 
 ## Installation
 
@@ -100,11 +102,14 @@ pip install flagged-csv
 # Basic conversion
 flagged-csv input.xlsx -t Sheet1 > output.csv
 
-# Include colors and merge information
+# Include all colors (foreground and background) with merge information
 flagged-csv input.xlsx -t Sheet1 --include-colors --signal-merge -o output.csv
 
-# Preserve formatting and ignore white backgrounds
-flagged-csv input.xlsx -t Sheet1 --preserve-formats --include-colors --ignore-colors "#FFFFFF"
+# Include background colors only, preserve formatting, ignore white backgrounds
+flagged-csv input.xlsx -t Sheet1 --preserve-formats --include-bg-colors --ignore-colors "#FFFFFF"
+
+# Include foreground colors only (font colors)
+flagged-csv input.xlsx -t Sheet1 --include-fg-colors -o output.csv
 
 # Include cell locations and keep empty rows for structure preservation
 flagged-csv input.xlsx -t Sheet1 --add-location --keep-empty-lines -o output.csv
@@ -145,9 +150,18 @@ with open('output.csv', 'w') as f:
 ## Flag Format Specification
 
 ### Color Flags
-- Format: `{#RRGGBB}`
-- Example: `Sales{#FF0000}` - "Sales" with red background
-- Multiple flags can be combined: `100{#00FF00}{MG:123456}{l:B5}`
+
+#### Background Color
+- Format: `{#RRGGBB}` (backward-compatible) or `{bc:#RRGGBB}` (explicit)
+- Example: `Sales{#FF0000}` or `Sales{bc:#FF0000}` - "Sales" with red background
+
+#### Foreground Color
+- Format: `{fc:#RRGGBB}`
+- Example: `Text{fc:#0000FF}` - "Text" with blue font color
+
+#### Combined Colors
+- Multiple flags can be combined: `100{#FFFF00}{fc:#FF0000}{MG:123456}{l:B5}`
+- This represents: Yellow background, red text, part of merge group 123456, from cell B5
 
 ### Merge Flags  
 - Format: `{MG:XXXXXX}` where XXXXXX is a 6-digit identifier
@@ -163,12 +177,14 @@ with open('output.csv', 'w') as f:
 ### Example Output
 
 Given an Excel file with:
-- Cell A1: "Total Sales" with blue background (#0000FF)
+- Cell A1: "Total Sales" with blue background (#0000FF) and white text (#FFFFFF)
 - Cells B1-D1: Merged cell containing "$1,000" with green background (#00FF00)
+- Cell A2: "Profit" with red text (#FF0000)
 
-The CSV output would be:
+The CSV output with `--include-colors` would be:
 ```csv
-Total Sales{#0000FF},$1000{#00FF00}{MG:384756},{MG:384756},{MG:384756}
+Total Sales{#0000FF}{fc:#FFFFFF},$1000{#00FF00}{MG:384756},{MG:384756},{MG:384756}
+Profit{fc:#FF0000},,
 ```
 
 ## Configuration Options
@@ -178,7 +194,9 @@ Total Sales{#0000FF},$1000{#00FF00}{MG:384756},{MG:384756},{MG:384756}
 - `-t, --tab-name`: Sheet name to convert (required)
 - `-o, --output`: Output file path (default: stdout)
 - `--format`: Output format: csv, html, or markdown (default: csv)
-- `--include-colors`: Include cell background colors as {#RRGGBB} flags
+- `--include-colors`: Include both foreground and background colors
+- `--include-bg-colors`: Include background colors only as {#RRGGBB} flags
+- `--include-fg-colors`: Include foreground colors only as {fc:#RRGGBB} flags
 - `--signal-merge`: Include merged cell information as {MG:XXXXXX} flags
 - `--preserve-formats`: Preserve number/date formatting as displayed in Excel
 - `--ignore-colors`: Comma-separated hex colors to ignore (e.g., "#FFFFFF,#000000")
@@ -209,7 +227,10 @@ converter = XlsxConverter(config)
 csv_content = converter.convert_to_csv(
     'data.xlsx',
     tab_name='Sheet1',
-    include_colors=True,
+    include_colors=True,      # Include both fg and bg colors
+    # OR use specific color options:
+    # include_bg_colors=True,  # Background colors only
+    # include_fg_colors=True,  # Foreground colors only
     signal_merge=True,
     preserve_formats=True,
     add_location=True,        # Add {l:A5} cell coordinates

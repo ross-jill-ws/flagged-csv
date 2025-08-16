@@ -91,3 +91,6 @@ PYPI_UPDATE_GUIDE.md
 test-install
 __pycache__
 
+# temporary files
+temp
+
