@@ -614,13 +614,34 @@ class XlsxConverter:
                     return f"#{base_color}"
                 
                 elif color.type == 'indexed' and hasattr(color, 'indexed'):
-                    # Standard indexed colors
-                    indexed_colors = {
-                        0: "#000000", 1: "#FFFFFF", 2: "#FF0000", 3: "#00FF00",
-                        4: "#0000FF", 5: "#FFFF00", 6: "#FF00FF", 7: "#00FFFF",
-                        # ... (abbreviated for brevity)
-                    }
-                    return indexed_colors.get(color.indexed, "#000000")
+                    # Try to get indexed color from workbook or use openpyxl's COLOR_INDEX
+                    idx = color.indexed
+                    if idx is not None:
+                        # First try to get from workbook's custom colors if available
+                        wb = cell.parent.parent  # cell -> worksheet -> workbook
+                        if hasattr(wb, '_colors') and wb._colors and idx < len(wb._colors):
+                            rgb = wb._colors[idx]
+                            # Remove alpha channel if present (first 2 chars)
+                            if len(rgb) == 8 and rgb.startswith('00'):
+                                return f"#{rgb[2:]}"
+                            elif len(rgb) == 6:
+                                return f"#{rgb}"
+                        
+                        # Fall back to openpyxl's default COLOR_INDEX
+                        try:
+                            from openpyxl.styles.colors import COLOR_INDEX
+                            if idx < len(COLOR_INDEX):
+                                rgb = COLOR_INDEX[idx]
+                                # Remove alpha channel if present
+                                if len(rgb) == 8:
+                                    return f"#{rgb[2:]}"
+                                elif len(rgb) == 6:
+                                    return f"#{rgb}"
+                        except ImportError:
+                            pass
+                    
+                    # If all else fails, return white (most common for undefined indexed colors)
+                    return "#FFFFFF"
                 
                 elif color.type == 'rgb' or not hasattr(color, 'type'):
                     if hasattr(color, 'rgb'):

@@ -399,6 +399,36 @@ class TestXlsxConverter:
             assert '{#FFFFFF}' in lines[0]  # White bg included
             assert '{fc:#000000}' in lines[0]  # Black fg included (with background)
     
+    def test_indexed_colors(self):
+        """Test that indexed colors are correctly mapped."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with indexed colors
+            xlsx_path = Path(temp_dir) / "test_indexed.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            
+            # Set cells with different indexed colors
+            ws['A1'] = 'Red Background'
+            ws['A1'].fill = PatternFill(patternType='solid', fgColor='00FF0000')  # Index 2 = Red
+            
+            ws['B1'] = 'Green Background'
+            ws['B1'].fill = PatternFill(patternType='solid', fgColor='0000FF00')  # Index 3 = Green
+            
+            wb.save(xlsx_path)
+            
+            # Convert with colors
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet',
+                include_bg_colors=True,
+                ignore_bg_colors=''  # Don't ignore any colors for this test
+            )
+            
+            # Check that colors are extracted correctly
+            assert '{#FF0000}' in result  # Red
+            assert '{#00FF00}' in result  # Green
+    
     def test_max_rows_columns(self):
         """Test max rows and columns limits."""
         with tempfile.TemporaryDirectory() as temp_dir:

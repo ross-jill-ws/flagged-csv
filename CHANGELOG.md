@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2025-08-16
+
+### Fixed
+- Use workbook's actual indexed color palette instead of hardcoded values
+- Indexed colors now correctly read from workbook._colors when available
+- Falls back to openpyxl's COLOR_INDEX for standard colors
+- Fixes issue where indexed color 9 was incorrectly showing as black (#000000) instead of white (#FFFFFF)
+
+### Added
+- Test case for indexed color handling
+
+### Changed
+- Removed hardcoded indexed color mapping that could be incorrect for custom palettes
+
 ## [0.1.2] - 2025-08-16
 
 ### Added
