@@ -93,4 +93,5 @@ __pycache__
 
 # temporary files
 temp
+*.egg-info/
 

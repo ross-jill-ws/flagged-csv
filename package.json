@@ -1,0 +1,16 @@
+{
+  "name": "python-flagged-csv",
+  "version": "1.0.0",
+  "description": "Convert XLSX files to CSV while preserving visual formatting information as inline flags.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "uv run pytest tests/",
+    "prepare": "rm -rf dist/ build/ *.egg-info/ && uv build && twine check dist/*",
+    "publish": "twine upload dist/*"
+  },
+  "author": "",
+  "license": "ISC"
+}

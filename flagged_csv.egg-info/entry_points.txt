@@ -1,2 +1,0 @@
-[console_scripts]
-flagged-csv = flagged_csv.cli:main
