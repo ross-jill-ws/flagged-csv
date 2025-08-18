@@ -8,6 +8,10 @@ Traditional XLSX → CSV conversion will cause the loss of format such as backgr
 The new Flagged CSV will attach important flags to the original cell value, keeping the colors/cell-merge with {} flags
 ![ShowExcelConversionFlaggedCsv_ManimCE_v0 19 0](https://github.com/user-attachments/assets/2dee974a-d480-4f71-9404-10b121df388f)
 
+### Video Tutorial
+
+[![Flagged CSV Component Demo](https://img.youtube.com/vi/7nSWQ8i0HTQ/maxresdefault.jpg)](https://youtu.be/7nSWQ8i0HTQ)
+
 ## Why Flagged CSV is Critical for AI
 
 Traditional AI models cannot process XLSX files directly. When users convert XLSX to CSV for AI processing, critical visual information is lost - colors that indicate categories, merged cells that show date ranges, and formatting that conveys meaning. This forces users to manually add context that was already present visually.
