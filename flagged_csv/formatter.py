@@ -3,9 +3,8 @@ Excel format string parser and formatter.
 """
 
 import re
-from decimal import Decimal
 from datetime import datetime, date
-from typing import Any, Union
+from typing import Any
 import pandas as pd
 
 
@@ -109,19 +108,39 @@ class ExcelFormatter:
             if not isinstance(value, (datetime, date)):
                 return str(value)
             
-            # Convert Excel format to Python format
-            format_map = {
-                'yyyy': '%Y', 'yy': '%y',
-                'mmmm': '%B', 'mmm': '%b', 'mm': '%m', 'm': '%-m',
-                'dddd': '%A', 'ddd': '%a', 'dd': '%d', 'd': '%-d',
-                'hh': '%H', 'h': '%-H',
-                'mm': '%M', 'm': '%-M',
-                'ss': '%S', 's': '%-S'
-            }
-            
+            # Convert Excel format to Python format  
+            # Handle date/time formats carefully to avoid conflicts and platform issues
+            # Process in order to avoid single-char patterns conflicting with multi-char patterns
             py_format = format_string
-            for excel, python in sorted(format_map.items(), key=lambda x: -len(x[0])):
-                py_format = py_format.replace(excel, python)
+            
+            # First handle multi-character patterns
+            replacements = [
+                ('yyyy', '%Y'),  # 4-digit year
+                ('mmmm', '%B'),  # Full month name (January)
+                ('mmm', '%b'),   # Abbreviated month name (Jan)
+                ('dddd', '%A'),  # Full day name (Monday)
+                ('ddd', '%a'),   # Abbreviated day name (Mon)
+                ('yy', '%y'),    # 2-digit year
+                ('mm', '%m'),    # Month number (zero-padded) or minutes (context dependent)
+                ('dd', '%d'),    # Day of month (zero-padded)
+                ('hh', '%H'),    # Hour (24-hour, zero-padded)
+                ('ss', '%S'),    # Second (zero-padded)
+            ]
+            
+            # Apply replacements in order
+            for excel_pattern, python_pattern in replacements:
+                py_format = py_format.replace(excel_pattern, python_pattern)
+            
+            # Only handle single character patterns if they haven't been replaced yet
+            # This avoids conflicts with already-replaced multi-character patterns
+            if 'm' in py_format and '%m' not in py_format:
+                py_format = py_format.replace('m', '%m')
+            if 'd' in py_format and '%d' not in py_format:
+                py_format = py_format.replace('d', '%d')
+            if 'h' in py_format and '%H' not in py_format:
+                py_format = py_format.replace('h', '%H')
+            if 's' in py_format and '%S' not in py_format:
+                py_format = py_format.replace('s', '%S')
             
             return value.strftime(py_format)
             

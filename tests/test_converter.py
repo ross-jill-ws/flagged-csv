@@ -429,6 +429,48 @@ class TestXlsxConverter:
             assert '{#FF0000}' in result  # Red
             assert '{#00FF00}' in result  # Green
     
+    def test_date_format_preservation(self):
+        """Test that date formats are preserved correctly with --preserve-formats."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with various date formats
+            xlsx_path = Path(temp_dir) / "test_dates.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            
+            # Set up dates with different formats
+            from datetime import datetime
+            test_date1 = datetime(2025, 10, 1)
+            test_date2 = datetime(2025, 12, 31)
+            
+            ws['A1'] = 'Date Formats'
+            ws['A2'] = test_date1
+            ws['A3'] = test_date2
+            
+            # Set different date number formats
+            ws['A2'].number_format = 'mm-dd-yy'  # Should become 10-01-25
+            ws['A3'].number_format = 'yyyy-mm-dd'  # Should become 2025-12-31
+            
+            wb.save(xlsx_path)
+            
+            # Convert with preserve formats
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet',
+                preserve_formats=True
+            )
+            
+            lines = result.strip().split('\n')
+            
+            # Check that dates are formatted according to their Excel format
+            assert '10-01-25' in lines[1]  # mm-dd-yy format
+            assert '2025-12-31' in lines[2]  # yyyy-mm-dd format
+            
+            # Ensure no platform-specific format issues (like %-d)
+            assert '%-' not in result
+            assert '%m' not in result
+            assert '%d' not in result
+    
     def test_max_rows_columns(self):
         """Test max rows and columns limits."""
         with tempfile.TemporaryDirectory() as temp_dir:
