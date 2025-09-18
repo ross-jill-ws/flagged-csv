@@ -2,7 +2,7 @@
 Main XLSX to Flagged CSV converter implementation.
 """
 
-from typing import Optional, Literal, Dict, Any
+from typing import Optional, Literal, Dict
 from pathlib import Path
 import random
 import warnings
@@ -44,7 +44,30 @@ class XlsxConverterConfig(BaseModel):
 
 
 class XlsxConverter:
-    """Convert XLSX files to CSV format with optional formatting flags."""
+    
+    def _has_hidden_rows_or_columns(self, file_path: str, sheet_name: str, max_rows: int, max_columns: int) -> bool:
+        """Check if the worksheet has any hidden rows or columns within the specified range."""
+        try:
+            wb = load_workbook(file_path, data_only=True, keep_links=False)
+            ws = wb[sheet_name]
+            
+            # Check for hidden rows
+            for row_idx in range(1, max_rows + 1):
+                row_dim = ws.row_dimensions.get(row_idx)
+                if row_dim and getattr(row_dim, 'hidden', False):
+                    return True
+            
+            # Check for hidden columns
+            for col_idx in range(1, max_columns + 1):
+                col_letter = get_column_letter(col_idx)
+                col_dim = ws.column_dimensions.get(col_letter)
+                if col_dim and getattr(col_dim, 'hidden', False):
+                    return True
+                    
+            return False
+        except Exception:
+            # If we can't determine, err on the side of caution and use the formatting path
+            return True
     
     def __init__(self, config: Optional[XlsxConverterConfig] = None):
         """
@@ -170,8 +193,11 @@ class XlsxConverter:
                 else:
                     fg_ignore_list.add('000000')  # Default: ignore black foreground
             
+            # Check if there are hidden rows or columns that require special handling
+            has_hidden_elements = self._has_hidden_rows_or_columns(input_file_path, tab_name, max_rows, max_columns)
+            
             # Determine whether to use special formatting
-            if include_bg_colors or include_fg_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location:
+            if include_bg_colors or include_fg_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location or has_hidden_elements:
                 df = self._read_excel_with_formatting(
                     input_file_path, tab_name, 
                     include_bg_colors, include_fg_colors,
@@ -276,8 +302,22 @@ class XlsxConverter:
             ws = wb[sheet_name]
             
             data = []
-            for row in ws.iter_rows(values_only=True, max_row=max_rows, max_col=max_columns):
-                data.append(row)
+            for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, max_col=max_columns), 1):
+                # Skip hidden rows
+                row_dim = ws.row_dimensions.get(row_idx)
+                if row_dim and getattr(row_dim, 'hidden', False):
+                    continue
+                
+                # Filter out hidden columns
+                visible_values = []
+                for col_idx, cell in enumerate(row, 1):
+                    col_letter = get_column_letter(col_idx)
+                    col_dim = ws.column_dimensions.get(col_letter)
+                    # Only include non-hidden columns
+                    if not (col_dim and getattr(col_dim, 'hidden', False)):
+                        visible_values.append(cell.value)
+                
+                data.append(tuple(visible_values))
             
             if data:
                 df = pd.DataFrame(data)
@@ -432,10 +472,25 @@ class XlsxConverter:
         processed_data = []
         
         for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, max_col=max_columns), 1):
+            # Skip hidden rows
+            row_dim = ws.row_dimensions.get(row_idx)
+            if row_dim and getattr(row_dim, 'hidden', False):
+                continue
+                
             row_data = []
             has_content = False
             
+            # Create a list of visible columns first
+            visible_cells = []
             for col_idx, cell in enumerate(row, 1):
+                col_letter = get_column_letter(col_idx)
+                col_dim = ws.column_dimensions.get(col_letter)
+                # Only include non-hidden columns
+                if not (col_dim and getattr(col_dim, 'hidden', False)):
+                    visible_cells.append(cell)
+            
+            # Process only visible cells
+            for cell in visible_cells:
                 value = cell.value
                 if value is not None:
                     has_content = True

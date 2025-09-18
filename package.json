@@ -4,7 +4,8 @@
   "description": "Convert XLSX files to CSV while preserving visual formatting information as inline flags.",
   "main": "index.js",
   "directories": {
-    "test": "tests"
+    "test": "tests",
+    "flagged-csv": "flagged-csv -t Sheet7 ./temp/2025-Rubii-Media-Plan-Hidden-Rows.xlsx --output temp/2025-Rubii-Media-Plan-Hidden-Rows.csv --signal-merge --preserve-formats --include-colors --add-location"
   },
   "scripts": {
     "test": "uv run pytest tests/",

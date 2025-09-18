@@ -471,6 +471,71 @@ class TestXlsxConverter:
             assert '%m' not in result
             assert '%d' not in result
     
+    def test_hidden_rows_columns(self):
+        """Test that hidden rows and columns are skipped by default."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create test file with hidden rows and columns
+            xlsx_path = Path(temp_dir) / "test_hidden.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            
+            # Set up test data
+            ws['A1'] = 'Header1'
+            ws['B1'] = 'Header2'
+            ws['C1'] = 'Header3'
+            
+            ws['A2'] = 'Row2A'
+            ws['B2'] = 'Row2B'
+            ws['C2'] = 'Row2C'
+            
+            ws['A3'] = 'Row3A'  # This row will be hidden
+            ws['B3'] = 'Row3B'
+            ws['C3'] = 'Row3C'
+            
+            ws['A4'] = 'Row4A'
+            ws['B4'] = 'Row4B'  # This column will be hidden
+            ws['C4'] = 'Row4C'
+            
+            # Hide row 3 and column B
+            ws.row_dimensions[3].hidden = True
+            ws.column_dimensions['B'].hidden = True
+            
+            wb.save(xlsx_path)
+            
+            # Convert without any special flags
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path),
+                'Sheet'
+            )
+            
+            lines = result.strip().split('\n')
+            
+            # Should have 3 rows (header, row2, row4) but not row3
+            assert len(lines) == 3
+            
+            # Row 3 should be skipped (hidden)
+            assert 'Row3A' not in result
+            assert 'Row3B' not in result
+            assert 'Row3C' not in result
+            
+            # Column B should be skipped (hidden)
+            assert 'Header2' not in result
+            assert 'Row2B' not in result
+            assert 'Row4B' not in result
+            
+            # But other cells should be present
+            assert 'Header1' in result
+            assert 'Header3' in result
+            assert 'Row2A' in result
+            assert 'Row2C' in result
+            assert 'Row4A' in result
+            assert 'Row4C' in result
+            
+            # Check structure: should be Header1,Header3 (not Header1,Header2,Header3 due to hidden column)
+            expected_header = 'Header1,Header3'
+            assert lines[0] == expected_header
+    
     def test_max_rows_columns(self):
         """Test max rows and columns limits."""
         with tempfile.TemporaryDirectory() as temp_dir:
