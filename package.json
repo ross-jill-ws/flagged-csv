@@ -1,16 +1,16 @@
 {
   "name": "python-flagged-csv",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Convert XLSX files to CSV while preserving visual formatting information as inline flags.",
   "main": "index.js",
   "directories": {
-    "test": "tests",
-    "flagged-csv": "flagged-csv -t Sheet7 ./temp/2025-Rubii-Media-Plan-Hidden-Rows.xlsx --output temp/2025-Rubii-Media-Plan-Hidden-Rows.csv --signal-merge --preserve-formats --include-colors --add-location"
+    "test": "tests"
   },
   "scripts": {
     "test": "uv run pytest tests/",
     "prepare": "rm -rf dist/ build/ *.egg-info/ && uv build && twine check dist/*",
-    "publish": "twine upload dist/*"
+    "publish": "twine upload dist/*",
+    "flagged-csv": "flagged-csv -t Sheet7 ./temp/2025-Rubii-Media-Plan-Hidden-Rows.xlsx --output temp/2025-Rubii-Media-Plan-Hidden-Rows.csv --signal-merge --preserve-formats --include-colors --add-location"
   },
   "author": "",
   "license": "ISC"
