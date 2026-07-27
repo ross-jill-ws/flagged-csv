@@ -2,7 +2,7 @@
 Main XLSX to Flagged CSV converter implementation.
 """
 
-from typing import Optional, Literal, Dict
+from typing import Optional, Literal, Dict, List, Set
 from pathlib import Path
 import random
 import warnings
@@ -12,7 +12,7 @@ import xml.etree.ElementTree as etree
 
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 from pydantic import BaseModel, Field
 
 from .formatter import ExcelFormatter
@@ -44,31 +44,164 @@ class XlsxConverterConfig(BaseModel):
 
 
 class XlsxConverter:
-    
-    def _has_hidden_rows_or_columns(self, file_path: str, sheet_name: str, max_rows: int, max_columns: int) -> bool:
-        """Check if the worksheet has any hidden rows or columns within the specified range."""
+
+    @staticmethod
+    def _hidden_column_indices(ws, limit: Optional[int] = None) -> Set[int]:
+        """Collect the 1-based indices of every hidden column of a worksheet.
+
+        openpyxl stores a whole ``<col min="3" max="5" hidden="1"/>`` RANGE under a
+        SINGLE key in ``ws.column_dimensions`` (the letter of ``min``), so looking a
+        column up by its own letter misses every column but the first one of the
+        range. This helper expands each dimension over ``min..max`` so the caller
+        gets one entry per actually hidden column.
+
+        Args:
+            ws: openpyxl worksheet
+            limit: Optional highest column index worth reporting (ranges routinely
+                extend to the last possible column, 16384)
+
+        Returns:
+            Set[int]: 1-based indices of the hidden columns
+        """
+        hidden: Set[int] = set()
+
+        for key, dim in ws.column_dimensions.items():
+            if not getattr(dim, 'hidden', False):
+                continue
+
+            # Fall back to the dict key when a dimension carries no explicit range
+            # (dimensions created in memory, e.g. ws.column_dimensions['B'].hidden = True)
+            key_index = None
+            try:
+                key_index = column_index_from_string(str(key))
+            except Exception:
+                key_index = None
+
+            start = getattr(dim, 'min', None) or key_index
+            end = getattr(dim, 'max', None) or start
+            if start is None:
+                continue
+
+            end = min(int(end), limit) if limit is not None else int(end)
+            hidden.update(range(int(start), end + 1))
+
+        return hidden
+
+    @staticmethod
+    def _hidden_row_indices(ws, limit: Optional[int] = None) -> Set[int]:
+        """Collect the 1-based indices of every hidden row of a worksheet.
+
+        Unlike ``<col>``, an xlsx ``<row>`` element always describes a single row and
+        openpyxl leaves ``RowDimension.min``/``max`` as None, so the dict key is the
+        authoritative index. The min/max range is still honoured when present so the
+        helper stays correct if a dimension ever carries one.
+
+        Args:
+            ws: openpyxl worksheet
+            limit: Optional highest row index worth reporting
+
+        Returns:
+            Set[int]: 1-based indices of the hidden rows
+        """
+        hidden: Set[int] = set()
+
+        for key, dim in ws.row_dimensions.items():
+            if not getattr(dim, 'hidden', False):
+                continue
+
+            try:
+                key_index = int(key)
+            except (TypeError, ValueError):
+                key_index = None
+
+            start = getattr(dim, 'min', None) or key_index
+            end = getattr(dim, 'max', None) or start
+            if start is None:
+                continue
+
+            end = min(int(end), limit) if limit is not None else int(end)
+            hidden.update(range(int(start), end + 1))
+
+        return hidden
+
+    @staticmethod
+    def _visible_column_indices(hidden_columns: Set[int], max_columns: int) -> List[int]:
+        """List the 1-based indices of the columns that survive hidden-column removal."""
+        return [col_idx for col_idx in range(1, max_columns + 1) if col_idx not in hidden_columns]
+
+    @staticmethod
+    def _column_labels(visible_indices: List[int], count: int) -> List[str]:
+        """Build ``count`` CSV header labels from the ORIGINAL spreadsheet columns.
+
+        Surviving columns keep their real spreadsheet letter (A,B,F,G) instead of
+        being renumbered sequentially from A after hidden columns were dropped.
+        """
+        labels = [get_column_letter(idx) for idx in visible_indices[:count]]
+        next_idx = (visible_indices[-1] + 1) if visible_indices else 1
+        while len(labels) < count:
+            labels.append(get_column_letter(next_idx))
+            next_idx += 1
+        return labels
+
+    def _collect_hidden_dimensions(self, file_path: str, sheet_name: str, max_rows: int, max_columns: int):
+        """Read the hidden rows/columns of a sheet without loading its values twice.
+
+        Returns:
+            tuple: ``(hidden_rows, hidden_columns, known)`` where ``known`` is False
+            when the workbook could not be inspected (unsupported format, corrupt
+            file, ...). In that case both sets are empty and the caller should not
+            trust them.
+        """
         try:
             wb = load_workbook(file_path, data_only=True, keep_links=False)
             ws = wb[sheet_name]
-            
-            # Check for hidden rows
-            for row_idx in range(1, max_rows + 1):
-                row_dim = ws.row_dimensions.get(row_idx)
-                if row_dim and getattr(row_dim, 'hidden', False):
-                    return True
-            
-            # Check for hidden columns
-            for col_idx in range(1, max_columns + 1):
-                col_letter = get_column_letter(col_idx)
-                col_dim = ws.column_dimensions.get(col_letter)
-                if col_dim and getattr(col_dim, 'hidden', False):
-                    return True
-                    
-            return False
+            return (
+                self._hidden_row_indices(ws, limit=max_rows),
+                self._hidden_column_indices(ws, limit=max_columns),
+                True,
+            )
         except Exception:
+            return set(), set(), False
+
+    def _has_hidden_rows_or_columns(self, file_path: str, sheet_name: str, max_rows: int, max_columns: int) -> bool:
+        """Check if the worksheet has any hidden rows or columns within the specified range."""
+        hidden_rows, hidden_columns, known = self._collect_hidden_dimensions(
+            file_path, sheet_name, max_rows, max_columns
+        )
+        if not known:
             # If we can't determine, err on the side of caution and use the formatting path
             return True
-    
+        return bool(hidden_rows or hidden_columns)
+
+    def _apply_hidden_and_label_columns(
+        self,
+        df: pd.DataFrame,
+        hidden_rows: Set[int],
+        hidden_columns: Set[int]
+    ) -> pd.DataFrame:
+        """Drop hidden rows/columns from a positional DataFrame and label the rest.
+
+        The DataFrame is expected to still be positional, i.e. its i-th column is
+        spreadsheet column ``i + 1`` and its i-th row is spreadsheet row ``i + 1``
+        (as produced by ``pd.read_excel(..., header=None)`` before empty rows are
+        removed). Surviving columns are labelled with their ORIGINAL spreadsheet
+        letter rather than being renumbered from A.
+        """
+        if len(df.columns) == 0:
+            return df
+
+        keep_positions = [i for i in range(len(df.columns)) if (i + 1) not in hidden_columns]
+        if len(keep_positions) != len(df.columns):
+            df = df.iloc[:, keep_positions]
+        df.columns = [get_column_letter(i + 1) for i in keep_positions]
+
+        if hidden_rows:
+            keep_rows = [i for i in range(len(df)) if (i + 1) not in hidden_rows]
+            if len(keep_rows) != len(df):
+                df = df.iloc[keep_rows]
+
+        return df
+
     def __init__(self, config: Optional[XlsxConverterConfig] = None):
         """
         Initialize the converter.
@@ -194,8 +327,13 @@ class XlsxConverter:
                     fg_ignore_list.add('000000')  # Default: ignore black foreground
             
             # Check if there are hidden rows or columns that require special handling
-            has_hidden_elements = self._has_hidden_rows_or_columns(input_file_path, tab_name, max_rows, max_columns)
-            
+            hidden_rows, hidden_columns, hidden_known = self._collect_hidden_dimensions(
+                input_file_path, tab_name, max_rows, max_columns
+            )
+            # When the workbook can't be inspected, err on the side of caution and
+            # use the formatting path (which re-reads the sheet with openpyxl).
+            has_hidden_elements = (not hidden_known) or bool(hidden_rows or hidden_columns)
+
             # Determine whether to use special formatting
             if include_bg_colors or include_fg_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location or has_hidden_elements:
                 df = self._read_excel_with_formatting(
@@ -209,7 +347,8 @@ class XlsxConverter:
             else:
                 df = self._read_excel_with_fallback(
                     input_file_path, tab_name, self.config.keep_default_na,
-                    max_rows, max_columns, should_keep_empty_lines
+                    max_rows, max_columns, should_keep_empty_lines,
+                    hidden_rows, hidden_columns
                 )
             
             # Convert to requested format
@@ -225,9 +364,19 @@ class XlsxConverter:
                 raise ValueError(f"Sheet '{tab_name}' not found in {path.name}")
             raise
     
-    def _read_excel_with_fallback(self, file_path: str, sheet_name: str, keep_default_na: bool, max_rows: int = 300, max_columns: int = 100, keep_empty_lines: bool = False) -> pd.DataFrame:
+    def _read_excel_with_fallback(
+        self,
+        file_path: str,
+        sheet_name: str,
+        keep_default_na: bool,
+        max_rows: int = 300,
+        max_columns: int = 100,
+        keep_empty_lines: bool = False,
+        hidden_rows: Optional[Set[int]] = None,
+        hidden_columns: Optional[Set[int]] = None
+    ) -> pd.DataFrame:
         """Read Excel file with multiple engine fallbacks.
-        
+
         Args:
             file_path: Path to the Excel file
             sheet_name: Name of the sheet to read
@@ -235,107 +384,83 @@ class XlsxConverter:
             max_rows: Maximum number of rows to read
             max_columns: Maximum number of columns to read
             keep_empty_lines: Whether to keep empty rows
-            
+            hidden_rows: 1-based indices of hidden rows to drop (computed from the
+                workbook when not provided)
+            hidden_columns: 1-based indices of hidden columns to drop (computed from
+                the workbook when not provided)
+
         Returns:
             pd.DataFrame: The loaded dataframe
         """
         exceptions = []
-        
+
+        if hidden_rows is None or hidden_columns is None:
+            collected_rows, collected_columns, _ = self._collect_hidden_dimensions(
+                file_path, sheet_name, max_rows, max_columns
+            )
+            hidden_rows = collected_rows if hidden_rows is None else hidden_rows
+            hidden_columns = collected_columns if hidden_columns is None else hidden_columns
+
+        def _finalize(df: pd.DataFrame) -> pd.DataFrame:
+            """Drop hidden rows/columns, label columns and trim empty rows."""
+            # Limit columns
+            if len(df.columns) > max_columns:
+                df = df.iloc[:, :max_columns]
+            # Drop hidden rows/columns and label the survivors with their original
+            # Excel-style letters (must happen while the frame is still positional)
+            df = self._apply_hidden_and_label_columns(df, hidden_rows, hidden_columns)
+            # Remove empty rows if needed
+            if not keep_empty_lines:
+                df = self._remove_empty_rows(df)
+            # Always trim trailing empty rows
+            return self._trim_trailing_empty_rows(df)
+
         # Try calamine engine first
         try:
-            df = pd.read_excel(file_path, sheet_name=sheet_name, 
+            df = pd.read_excel(file_path, sheet_name=sheet_name,
                                keep_default_na=keep_default_na, engine='calamine', nrows=max_rows, header=None)
-            # Limit columns
-            if len(df.columns) > max_columns:
-                df = df.iloc[:, :max_columns]
-            # Rename columns to Excel-style letters
-            df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
-            # Remove empty rows if needed
-            if not keep_empty_lines:
-                df = self._remove_empty_rows(df)
-            # Always trim trailing empty rows
-            df = self._trim_trailing_empty_rows(df)
-            return df
+            return _finalize(df)
         except Exception as e:
             exceptions.append(f"Calamine: {e}")
-        
+
         # Try openpyxl
         try:
-            df = pd.read_excel(file_path, sheet_name=sheet_name, 
+            df = pd.read_excel(file_path, sheet_name=sheet_name,
                                keep_default_na=keep_default_na, engine='openpyxl', nrows=max_rows, header=None)
-            # Limit columns
-            if len(df.columns) > max_columns:
-                df = df.iloc[:, :max_columns]
-            # Rename columns to Excel-style letters
-            df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
-            # Remove empty rows if needed
-            if not keep_empty_lines:
-                df = self._remove_empty_rows(df)
-            # Always trim trailing empty rows
-            df = self._trim_trailing_empty_rows(df)
-            return df
+            return _finalize(df)
         except Exception as e:
             exceptions.append(f"Openpyxl: {e}")
-        
+
         # Try xlrd
         try:
-            df = pd.read_excel(file_path, sheet_name=sheet_name, 
+            df = pd.read_excel(file_path, sheet_name=sheet_name,
                                keep_default_na=keep_default_na, engine='xlrd', nrows=max_rows, header=None)
-            # Limit columns
-            if len(df.columns) > max_columns:
-                df = df.iloc[:, :max_columns]
-            # Rename columns to Excel-style letters
-            df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
-            # Remove empty rows if needed
-            if not keep_empty_lines:
-                df = self._remove_empty_rows(df)
-            # Always trim trailing empty rows
-            df = self._trim_trailing_empty_rows(df)
-            return df
+            return _finalize(df)
         except Exception as e:
             exceptions.append(f"Xlrd: {e}")
-        
+
         # Direct openpyxl reading
         try:
             warnings.filterwarnings('ignore')
             wb = load_workbook(file_path, data_only=True, keep_links=False)
             ws = wb[sheet_name]
-            
+
             data = []
-            for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, max_col=max_columns), 1):
-                # Skip hidden rows
-                row_dim = ws.row_dimensions.get(row_idx)
-                if row_dim and getattr(row_dim, 'hidden', False):
-                    continue
-                
-                # Filter out hidden columns
-                visible_values = []
-                for col_idx, cell in enumerate(row, 1):
-                    col_letter = get_column_letter(col_idx)
-                    col_dim = ws.column_dimensions.get(col_letter)
-                    # Only include non-hidden columns
-                    if not (col_dim and getattr(col_dim, 'hidden', False)):
-                        visible_values.append(cell.value)
-                
-                data.append(tuple(visible_values))
-            
+            for row in ws.iter_rows(max_row=max_rows, max_col=max_columns):
+                data.append(tuple(cell.value for cell in row))
+
             if data:
+                # Hidden rows/columns are dropped by _finalize, which keeps the
+                # original column letters of the surviving columns
                 df = pd.DataFrame(data)
-                # Rename columns to Excel-style letters
-                df.columns = [get_column_letter(i + 1) for i in range(len(df.columns))]
                 if not keep_default_na:
                     df = df.fillna('')
-                # Remove empty rows if needed
-                if not keep_empty_lines:
-                    df = self._remove_empty_rows(df)
-                # Always trim trailing empty rows
-                df = self._trim_trailing_empty_rows(df)
-                return df
+                return _finalize(df)
             return pd.DataFrame()
-            
+
         except Exception as e:
             exceptions.append(f"Direct openpyxl: {e}")
-        
+
         # Check for sheet not found errors
         for exc in exceptions:
             if "not found" in exc.lower() or "does not exist" in exc.lower():
@@ -468,27 +593,28 @@ class XlsxConverter:
                         for col in range(merged_range.min_col, min(merged_range.max_col + 1, max_columns + 1)):
                             merge_map[(row, col)] = merge_id
         
+        # Resolve hidden rows/columns once (a single <col> element can hide a RANGE)
+        hidden_rows = self._hidden_row_indices(ws, limit=max_rows)
+        hidden_columns = self._hidden_column_indices(ws, limit=max_columns)
+        visible_col_indices = self._visible_column_indices(hidden_columns, max_columns)
+
         # Process all cells
         processed_data = []
-        
+
         for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, max_col=max_columns), 1):
             # Skip hidden rows
-            row_dim = ws.row_dimensions.get(row_idx)
-            if row_dim and getattr(row_dim, 'hidden', False):
+            if row_idx in hidden_rows:
                 continue
-                
+
             row_data = []
             has_content = False
-            
+
             # Create a list of visible columns first
-            visible_cells = []
-            for col_idx, cell in enumerate(row, 1):
-                col_letter = get_column_letter(col_idx)
-                col_dim = ws.column_dimensions.get(col_letter)
-                # Only include non-hidden columns
-                if not (col_dim and getattr(col_dim, 'hidden', False)):
-                    visible_cells.append(cell)
-            
+            visible_cells = [
+                cell for col_idx, cell in enumerate(row, 1)
+                if col_idx not in hidden_columns
+            ]
+
             # Process only visible cells
             for cell in visible_cells:
                 value = cell.value
@@ -572,8 +698,10 @@ class XlsxConverter:
                 row.append(None)
         
         # Create DataFrame with column letters as headers (A, B, C, ...)
-        # This provides meaningful column names for CSV output
-        column_names = [get_column_letter(i) for i in range(1, max_cols + 1)]
+        # This provides meaningful column names for CSV output. Columns that survived
+        # hidden-column removal keep their ORIGINAL spreadsheet letter (A,B,F,G),
+        # so the header always matches the {l:XX} location tags.
+        column_names = self._column_labels(visible_col_indices, max_cols)
         df = pd.DataFrame(processed_data, columns=column_names)
         
         # Fill NaN values if needed

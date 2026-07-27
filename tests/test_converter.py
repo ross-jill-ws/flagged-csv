@@ -536,6 +536,74 @@ class TestXlsxConverter:
             expected_header = 'Header1,Header3'
             assert lines[0] == expected_header
     
+    def test_hidden_column_range(self):
+        """Test that a hidden column RANGE (C:E) is fully skipped.
+
+        Excel stores consecutive hidden columns as a single
+        <col min="3" max="5" hidden="1"/> element, which openpyxl exposes under the
+        single key 'C'. Every column of the range must be dropped, and the surviving
+        columns must keep their original spreadsheet letters (A,B,F,G).
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_range.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for idx, value in enumerate(['AAA', 'BBB', 'CCC', 'DDD', 'EEE', 'FFF', 'GGG'], start=1):
+                ws.cell(row=1, column=idx, value=value)
+
+            # Hide columns C, D and E as a single range (as Excel itself writes it)
+            hidden_range = ws.column_dimensions['C']
+            hidden_range.min = 3
+            hidden_range.max = 5
+            hidden_range.hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter(XlsxConverterConfig(header=True))
+            result = converter.convert_to_csv(str(xlsx_path), 'Sheet1')
+
+            # Header keeps the ORIGINAL letters of the surviving columns
+            assert result.strip().split('\n') == ['A,B,F,G', 'AAA,BBB,FFF,GGG']
+            assert 'CCC' not in result
+            assert 'DDD' not in result
+            assert 'EEE' not in result
+
+            # Location tags must agree with the header letters
+            result_with_location = converter.convert_to_csv(
+                str(xlsx_path), 'Sheet1', add_location=True
+            )
+            lines = result_with_location.strip().split('\n')
+            assert lines[0] == 'A,B,F,G'
+            assert lines[1] == 'AAA{l:A1},BBB{l:B1},FFF{l:F1},GGG{l:G1}'
+
+    def test_hidden_single_column_preserves_letters(self):
+        """Test that a single hidden column keeps the other columns' real letters."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_single.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for idx, value in enumerate(['AAA', 'BBB', 'CCC', 'DDD', 'EEE', 'FFF'], start=1):
+                ws.cell(row=1, column=idx, value=value)
+
+            # Hide only column C
+            hidden_column = ws.column_dimensions['C']
+            hidden_column.min = 3
+            hidden_column.max = 3
+            hidden_column.hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter(XlsxConverterConfig(header=True))
+            result = converter.convert_to_csv(str(xlsx_path), 'Sheet1')
+
+            # D, E and F keep their letters instead of being renumbered to C, D, E
+            assert result.strip().split('\n') == ['A,B,D,E,F', 'AAA,BBB,DDD,EEE,FFF']
+            assert 'CCC' not in result
+
     def test_max_rows_columns(self):
         """Test max rows and columns limits."""
         with tempfile.TemporaryDirectory() as temp_dir:

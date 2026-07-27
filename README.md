@@ -211,6 +211,21 @@ Profit{fc:#FF0000},,
 - `--no-header`: Exclude DataFrame column headers (A, B, C...) from output
 - `--keep-na`: Keep NA values instead of converting to empty strings
 
+### Hidden Rows and Columns
+
+Hidden rows and hidden columns are skipped by default. A hidden column range
+(e.g. hiding C:E in Excel, stored as a single `<col min="3" max="5" hidden="1"/>`)
+drops every column it covers.
+
+The remaining columns keep their **original** spreadsheet letters, so the header
+always matches the real sheet coordinates (and the `{l:XX}` tags of
+`--add-location`). Hiding C:E in a sheet with columns A-G outputs:
+
+```csv
+A,B,F,G
+AAA,BBB,FFF,GGG
+```
+
 ### Python API Options
 
 ```python

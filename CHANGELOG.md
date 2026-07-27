@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Hidden column ranges are now fully skipped. Excel stores consecutive hidden
+  columns as a single `<col min="3" max="5" hidden="1"/>` element, which openpyxl
+  exposes under one key (`C`); only the first column of the range used to be
+  dropped, leaking the rest into the output
+- Columns that survive hidden-column removal keep their **original** spreadsheet
+  letters (e.g. `A,B,F,G`) instead of being renumbered from A, so the header now
+  matches the `{l:XX}` coordinates produced by `--add-location`
+
+### Changed
+- Hidden row/column detection is shared by all reading paths (calamine, openpyxl,
+  xlrd, direct openpyxl and the formatting path) via a single helper, so the
+  behaviour no longer depends on which engine succeeds
+- The `[0.1.1]` note below ("DataFrame columns are renamed to Excel-style
+  letters") only holds when no column is hidden
+
 ## [0.1.3] - 2025-08-16
 
 ### Fixed
