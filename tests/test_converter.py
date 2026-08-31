@@ -638,6 +638,124 @@ class TestXlsxConverter:
                 cells = line.split(',')
                 assert len(cells) == 4
 
+    def test_hidden_rows_do_not_consume_max_rows(self):
+        """max_rows counts VISIBLE rows: hidden rows must not eat into the limit."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_vs_max_rows.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for row in range(1, 11):
+                ws.cell(row=row, column=1, value=f"R{row}")
+
+            # Hide rows 2 and 3
+            for row in (2, 3):
+                ws.row_dimensions[row].hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(str(xlsx_path), 'Sheet1', max_rows=5)
+
+            # 5 VISIBLE rows: 1, 4, 5, 6, 7 (not just 1, 4, 5)
+            assert result.strip().split('\n') == ['R1', 'R4', 'R5', 'R6', 'R7']
+
+    def test_hidden_columns_do_not_consume_max_columns(self):
+        """max_columns counts VISIBLE columns: hidden columns must not eat into the limit."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_vs_max_columns.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for col in range(1, 11):
+                ws.cell(row=1, column=col, value=f"C{col}")
+
+            # Hide columns C and D as a single range element
+            hidden_range = ws.column_dimensions['C']
+            hidden_range.min = 3
+            hidden_range.max = 4
+            hidden_range.hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter(XlsxConverterConfig(header=True))
+            result = converter.convert_to_csv(str(xlsx_path), 'Sheet1', max_columns=5)
+
+            # 5 VISIBLE columns keeping their original letters: A, B, E, F, G
+            assert result.strip().split('\n') == ['A,B,E,F,G', 'C1,C2,C5,C6,C7']
+
+    def test_hidden_rows_chained_across_limit_boundary(self):
+        """A hidden run straddling the limit keeps extending the read window."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_chain.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for row in range(1, 11):
+                ws.cell(row=row, column=1, value=f"R{row}")
+
+            # Rows 3, 4 and 5 hidden with max_rows=3: each hidden row pulls the
+            # next one into the window (3 -> 4 -> 5 -> 6)
+            for row in (3, 4, 5):
+                ws.row_dimensions[row].hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(str(xlsx_path), 'Sheet1', max_rows=3)
+
+            assert result.strip().split('\n') == ['R1', 'R2', 'R6']
+
+    def test_hidden_rows_beyond_window_do_not_affect_output(self):
+        """Hidden rows past the visible window leave the first max_rows rows untouched."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_beyond.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for row in range(1, 11):
+                ws.cell(row=row, column=1, value=f"R{row}")
+
+            # Row 8 hidden but max_rows=5: rows 1-5 are all visible
+            ws.row_dimensions[8].hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(str(xlsx_path), 'Sheet1', max_rows=5)
+
+            assert result.strip().split('\n') == ['R1', 'R2', 'R3', 'R4', 'R5']
+
+    def test_hidden_rows_with_formatting_path(self):
+        """Visible-row counting also holds on the formatting path (colors etc.)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xlsx_path = Path(temp_dir) / "test_hidden_formatting.xlsx"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Sheet1'
+
+            for row in range(1, 11):
+                ws.cell(row=row, column=1, value=f"R{row}")
+
+            for row in (2, 3):
+                ws.row_dimensions[row].hidden = True
+
+            wb.save(xlsx_path)
+
+            converter = XlsxConverter()
+            result = converter.convert_to_csv(
+                str(xlsx_path), 'Sheet1', max_rows=5, add_location=True
+            )
+
+            lines = result.strip().split('\n')
+            assert lines == [
+                'R1{l:A1}', 'R4{l:A4}', 'R5{l:A5}', 'R6{l:A6}', 'R7{l:A7}'
+            ]
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

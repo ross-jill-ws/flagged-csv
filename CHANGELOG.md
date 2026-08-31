@@ -5,7 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.7] - 2026-08-31
+
+### Fixed
+- `max_rows`/`max_columns` now count **visible** rows/columns instead of
+  physical spreadsheet ones. Previously the readers truncated at physical
+  indices *before* dropping hidden rows/columns, so e.g. 50 hidden rows among
+  the first 300 produced only 250 output rows. The physical read window is now
+  widened to compensate (`_expand_limit`), including hidden runs that chain
+  across the window boundary (e.g. rows 299-350 hidden with `max_rows=300`)
+- Hidden-dimension detection is no longer capped at `max_rows`/`max_columns`
+  (it is bounded by the sheet's used range instead), so hidden rows/columns
+  just past the old cap are correctly accounted for
+
+### Changed
+- Sheets whose only hidden rows/columns lie beyond the visible window no longer
+  take the slower formatting path; their output is unaffected by the hidden
+  dimensions, so the fast engines are used
+
+## [0.1.6] - 2026-07-27
 
 ### Fixed
 - Hidden column ranges are now fully skipped. Excel stores consecutive hidden

@@ -125,6 +125,24 @@ class XlsxConverter:
         return hidden
 
     @staticmethod
+    def _expand_limit(limit: int, hidden: Set[int]) -> int:
+        """Grow a VISIBLE-count limit into the physical read cap that honours it.
+
+        ``max_rows``/``max_columns`` count rows/columns of the OUTPUT, but the
+        readers truncate at physical spreadsheet indices. Every hidden index
+        inside the window pushes the window one further down — which can pull
+        later hidden indices into it — so the cap is grown while walking the
+        hidden indices in ascending order.
+        """
+        cap = limit
+        for idx in sorted(hidden):
+            if idx <= cap:
+                cap += 1
+            else:
+                break
+        return cap
+
+    @staticmethod
     def _visible_column_indices(hidden_columns: Set[int], max_columns: int) -> List[int]:
         """List the 1-based indices of the columns that survive hidden-column removal."""
         return [col_idx for col_idx in range(1, max_columns + 1) if col_idx not in hidden_columns]
@@ -143,8 +161,14 @@ class XlsxConverter:
             next_idx += 1
         return labels
 
-    def _collect_hidden_dimensions(self, file_path: str, sheet_name: str, max_rows: int, max_columns: int):
+    def _collect_hidden_dimensions(self, file_path: str, sheet_name: str):
         """Read the hidden rows/columns of a sheet without loading its values twice.
+
+        The sets are bounded by the sheet's used range rather than by
+        ``max_rows``/``max_columns``: hidden indices past the used range cannot
+        affect the output, while hidden indices past a visible-count limit still
+        matter because they extend the physical read window (see
+        ``_expand_limit``).
 
         Returns:
             tuple: ``(hidden_rows, hidden_columns, known)`` where ``known`` is False
@@ -156,22 +180,23 @@ class XlsxConverter:
             wb = load_workbook(file_path, data_only=True, keep_links=False)
             ws = wb[sheet_name]
             return (
-                self._hidden_row_indices(ws, limit=max_rows),
-                self._hidden_column_indices(ws, limit=max_columns),
+                self._hidden_row_indices(ws, limit=ws.max_row or 1),
+                self._hidden_column_indices(ws, limit=ws.max_column or 1),
                 True,
             )
         except Exception:
             return set(), set(), False
 
     def _has_hidden_rows_or_columns(self, file_path: str, sheet_name: str, max_rows: int, max_columns: int) -> bool:
-        """Check if the worksheet has any hidden rows or columns within the specified range."""
-        hidden_rows, hidden_columns, known = self._collect_hidden_dimensions(
-            file_path, sheet_name, max_rows, max_columns
-        )
+        """Check if hidden rows/columns fall inside the first ``max_rows``/``max_columns`` VISIBLE ones."""
+        hidden_rows, hidden_columns, known = self._collect_hidden_dimensions(file_path, sheet_name)
         if not known:
             # If we can't determine, err on the side of caution and use the formatting path
             return True
-        return bool(hidden_rows or hidden_columns)
+        return (
+            self._expand_limit(max_rows, hidden_rows) > max_rows
+            or self._expand_limit(max_columns, hidden_columns) > max_columns
+        )
 
     def _apply_hidden_and_label_columns(
         self,
@@ -270,8 +295,10 @@ class XlsxConverter:
             ignore_fg_colors: Comma-separated hex colors to ignore for foreground (default: "#000000")
             keep_empty_lines: Whether to preserve empty rows (overrides config if provided)
             add_location: Whether to add location coordinates {l:A5} to cells (overrides config if provided)
-            max_rows: Maximum number of rows to process (default: 300)
-            max_columns: Maximum number of columns to process (default: 100)
+            max_rows: Maximum number of VISIBLE rows in the output (default: 300).
+                Hidden rows do not consume this budget.
+            max_columns: Maximum number of VISIBLE columns in the output (default: 100).
+                Hidden columns do not consume this budget.
             
         Returns:
             Formatted string in the requested format
@@ -328,11 +355,16 @@ class XlsxConverter:
             
             # Check if there are hidden rows or columns that require special handling
             hidden_rows, hidden_columns, hidden_known = self._collect_hidden_dimensions(
-                input_file_path, tab_name, max_rows, max_columns
+                input_file_path, tab_name
             )
             # When the workbook can't be inspected, err on the side of caution and
             # use the formatting path (which re-reads the sheet with openpyxl).
-            has_hidden_elements = (not hidden_known) or bool(hidden_rows or hidden_columns)
+            # Hidden dimensions only matter when they fall inside the visible
+            # window (the expanded cap moves past the plain limit exactly then).
+            has_hidden_elements = (not hidden_known) or (
+                self._expand_limit(max_rows, hidden_rows) > max_rows
+                or self._expand_limit(max_columns, hidden_columns) > max_columns
+            )
 
             # Determine whether to use special formatting
             if include_bg_colors or include_fg_colors or signal_merge or preserve_formats or should_keep_empty_lines or should_add_location or has_hidden_elements:
@@ -381,8 +413,8 @@ class XlsxConverter:
             file_path: Path to the Excel file
             sheet_name: Name of the sheet to read
             keep_default_na: Whether to keep default NA values
-            max_rows: Maximum number of rows to read
-            max_columns: Maximum number of columns to read
+            max_rows: Maximum number of VISIBLE rows to keep
+            max_columns: Maximum number of VISIBLE columns to keep
             keep_empty_lines: Whether to keep empty rows
             hidden_rows: 1-based indices of hidden rows to drop (computed from the
                 workbook when not provided)
@@ -396,19 +428,31 @@ class XlsxConverter:
 
         if hidden_rows is None or hidden_columns is None:
             collected_rows, collected_columns, _ = self._collect_hidden_dimensions(
-                file_path, sheet_name, max_rows, max_columns
+                file_path, sheet_name
             )
             hidden_rows = collected_rows if hidden_rows is None else hidden_rows
             hidden_columns = collected_columns if hidden_columns is None else hidden_columns
 
+        # Hidden rows/columns don't count towards the limits, so the physical
+        # read window has to be wide enough for max_rows/max_columns VISIBLE
+        # ones to survive the hidden drop.
+        read_rows = self._expand_limit(max_rows, hidden_rows)
+        read_columns = self._expand_limit(max_columns, hidden_columns)
+
         def _finalize(df: pd.DataFrame) -> pd.DataFrame:
             """Drop hidden rows/columns, label columns and trim empty rows."""
-            # Limit columns
-            if len(df.columns) > max_columns:
-                df = df.iloc[:, :max_columns]
+            # Limit columns (physical window, hidden ones still included)
+            if len(df.columns) > read_columns:
+                df = df.iloc[:, :read_columns]
             # Drop hidden rows/columns and label the survivors with their original
             # Excel-style letters (must happen while the frame is still positional)
             df = self._apply_hidden_and_label_columns(df, hidden_rows, hidden_columns)
+            # Guard the visible limits (only bites when caller-provided hidden
+            # sets disagree with the expansion above)
+            if len(df) > max_rows:
+                df = df.iloc[:max_rows]
+            if len(df.columns) > max_columns:
+                df = df.iloc[:, :max_columns]
             # Remove empty rows if needed
             if not keep_empty_lines:
                 df = self._remove_empty_rows(df)
@@ -418,7 +462,7 @@ class XlsxConverter:
         # Try calamine engine first
         try:
             df = pd.read_excel(file_path, sheet_name=sheet_name,
-                               keep_default_na=keep_default_na, engine='calamine', nrows=max_rows, header=None)
+                               keep_default_na=keep_default_na, engine='calamine', nrows=read_rows, header=None)
             return _finalize(df)
         except Exception as e:
             exceptions.append(f"Calamine: {e}")
@@ -426,7 +470,7 @@ class XlsxConverter:
         # Try openpyxl
         try:
             df = pd.read_excel(file_path, sheet_name=sheet_name,
-                               keep_default_na=keep_default_na, engine='openpyxl', nrows=max_rows, header=None)
+                               keep_default_na=keep_default_na, engine='openpyxl', nrows=read_rows, header=None)
             return _finalize(df)
         except Exception as e:
             exceptions.append(f"Openpyxl: {e}")
@@ -434,7 +478,7 @@ class XlsxConverter:
         # Try xlrd
         try:
             df = pd.read_excel(file_path, sheet_name=sheet_name,
-                               keep_default_na=keep_default_na, engine='xlrd', nrows=max_rows, header=None)
+                               keep_default_na=keep_default_na, engine='xlrd', nrows=read_rows, header=None)
             return _finalize(df)
         except Exception as e:
             exceptions.append(f"Xlrd: {e}")
@@ -446,7 +490,7 @@ class XlsxConverter:
             ws = wb[sheet_name]
 
             data = []
-            for row in ws.iter_rows(max_row=max_rows, max_col=max_columns):
+            for row in ws.iter_rows(max_row=read_rows, max_col=read_columns):
                 data.append(tuple(cell.value for cell in row))
 
             if data:
@@ -562,8 +606,8 @@ class XlsxConverter:
             fg_ignore_list: Set of foreground colors to ignore (hex without #)
             keep_empty_lines: Whether to preserve empty rows to maintain original row positions
             add_location: Whether to add location coordinates to non-empty cells
-            max_rows: Maximum number of rows to process
-            max_columns: Maximum number of columns to process
+            max_rows: Maximum number of VISIBLE rows to keep
+            max_columns: Maximum number of VISIBLE columns to keep
             
         Returns:
             pd.DataFrame: DataFrame with original structure and formatting embedded in values
@@ -581,27 +625,32 @@ class XlsxConverter:
         # Clear cached theme colors
         self._cached_theme_colors = None
         
+        # Resolve hidden rows/columns once (a single <col> element can hide a RANGE)
+        hidden_rows = self._hidden_row_indices(ws, limit=ws.max_row or 1)
+        hidden_columns = self._hidden_column_indices(ws, limit=ws.max_column or 1)
+        # max_rows/max_columns count VISIBLE rows/columns, so widen the physical
+        # read window to compensate for the hidden ones that get skipped. The
+        # used range bounds the window: nothing exists to read past it.
+        read_rows = min(self._expand_limit(max_rows, hidden_rows), ws.max_row or 1)
+        read_columns = min(self._expand_limit(max_columns, hidden_columns), ws.max_column or 1)
+        visible_col_indices = self._visible_column_indices(hidden_columns, read_columns)
+
         # Build merge map
         merge_map = {}
         if signal_merge and ws.merged_cells:
             for merged_range in ws.merged_cells.ranges:
                 # Only process merged cells within our limits
-                if merged_range.min_row <= max_rows and merged_range.min_col <= max_columns:
+                if merged_range.min_row <= read_rows and merged_range.min_col <= read_columns:
                     merge_id = str(random.randint(100000, 999999))
                     # Mark all cells in the merged range with the same ID (within limits)
-                    for row in range(merged_range.min_row, min(merged_range.max_row + 1, max_rows + 1)):
-                        for col in range(merged_range.min_col, min(merged_range.max_col + 1, max_columns + 1)):
+                    for row in range(merged_range.min_row, min(merged_range.max_row + 1, read_rows + 1)):
+                        for col in range(merged_range.min_col, min(merged_range.max_col + 1, read_columns + 1)):
                             merge_map[(row, col)] = merge_id
-        
-        # Resolve hidden rows/columns once (a single <col> element can hide a RANGE)
-        hidden_rows = self._hidden_row_indices(ws, limit=max_rows)
-        hidden_columns = self._hidden_column_indices(ws, limit=max_columns)
-        visible_col_indices = self._visible_column_indices(hidden_columns, max_columns)
 
         # Process all cells
         processed_data = []
 
-        for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, max_col=max_columns), 1):
+        for row_idx, row in enumerate(ws.iter_rows(max_row=read_rows, max_col=read_columns), 1):
             # Skip hidden rows
             if row_idx in hidden_rows:
                 continue

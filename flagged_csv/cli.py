@@ -23,8 +23,8 @@ from .converter import XlsxConverter, XlsxConverterConfig
 @click.option('--ignore-fg-colors', type=str, help='Ignore specific foreground colors (default: #000000)')
 @click.option('--keep-empty-lines', is_flag=True, help='Preserve empty rows to maintain original row positions')
 @click.option('--add-location', is_flag=True, help='Add location coordinates {l:A5} to non-empty cells')
-@click.option('--max-rows', type=int, default=300, help='Maximum rows to process (default: 300)')
-@click.option('--max-columns', type=int, default=100, help='Maximum columns to process (default: 100)')
+@click.option('--max-rows', type=int, default=300, help='Maximum visible rows in the output; hidden rows do not count (default: 300)')
+@click.option('--max-columns', type=int, default=100, help='Maximum visible columns in the output; hidden columns do not count (default: 100)')
 @click.option('--no-header', is_flag=True, help='Exclude header row from output')
 @click.option('--keep-na', is_flag=True, help='Keep NA values instead of converting to empty strings')
 def main(input_file, tab_name, output, format, include_colors, include_bg_colors,
