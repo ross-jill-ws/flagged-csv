@@ -23,5 +23,5 @@ Example:
 from .converter import XlsxConverter, XlsxConverterConfig
 from .formatter import ExcelFormatter
 
-__version__ = "0.1.0"
+__version__ = "0.1.8"
 __all__ = ["XlsxConverter", "XlsxConverterConfig", "ExcelFormatter"]

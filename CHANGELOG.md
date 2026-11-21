@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-11-22
+
+### Documentation
+- README (PyPI page): replaced the `yourusername` placeholder clone URL with
+  `ross-jill-ws/flagged-csv`; reorganised installation (pip, uv, from source)
+- Relative links (LICENSE, prompt file) replaced with absolute GitHub URLs so
+  they work on PyPI
+- Documented `--ignore-bg-colors`, `--ignore-fg-colors`, the `INPUT_FILE`
+  argument, visible-only `--max-rows`/`--max-columns`, and header defaults
+- Removed inaccurate "streaming" performance claim; added `{fc:}`/`{bc:}` to
+  the condensed AI prompt
+
+### Fixed
+- `__version__` now matches the package version
+
 ## [0.1.7] - 2026-08-31
 
 ### Fixed
