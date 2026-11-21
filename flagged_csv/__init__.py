@@ -2,8 +2,10 @@
 Flagged CSV - Convert XLSX files to CSV with visual formatting preserved as inline flags.
 
 This library allows you to convert Excel files to CSV while preserving:
-- Cell background colors as {{#RRGGBB}} flags
-- Merged cell information as {{MG:XXXXXX}} flags
+- Cell background colors as {#RRGGBB} flags
+- Font (foreground) colors as {fc:#RRGGBB} flags
+- Merged cell information as {MG:XXXXXX} flags
+- Original cell locations as {l:A5} flags
 - Cell formatting (currency, dates, etc.)
 
 Example:

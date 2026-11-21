@@ -78,24 +78,31 @@ Flagged CSV is a Python library and command-line tool that converts Excel (XLSX)
 
 ## Installation
 
-### Via uv (Recommended)
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/flagged-csv.git
-cd flagged-csv
-
-# Sync dependencies with uv
-uv sync
-
-# Install in development mode
-uv pip install -e .
-```
-
 ### Via pip
 
 ```bash
 pip install flagged-csv
+```
+
+### Via uv
+
+```bash
+# Add to a uv-managed project
+uv add flagged-csv
+
+# Or install the `flagged-csv` CLI as a standalone tool
+uv tool install flagged-csv
+```
+
+### From source
+
+```bash
+# Clone the repository
+git clone https://github.com/ross-jill-ws/flagged-csv.git
+cd flagged-csv
+
+# Sync dependencies (installs the package in editable mode)
+uv sync
 ```
 
 ## Quick Start
@@ -195,6 +202,7 @@ Profit{fc:#FF0000},,
 
 ### CLI Options
 
+- `INPUT_FILE`: Path to the Excel file (positional argument)
 - `-t, --tab-name`: Sheet name to convert (required)
 - `-o, --output`: Output file path (default: stdout)
 - `--format`: Output format: csv, html, or markdown (default: csv)
@@ -203,12 +211,14 @@ Profit{fc:#FF0000},,
 - `--include-fg-colors`: Include foreground colors only as {fc:#RRGGBB} flags
 - `--signal-merge`: Include merged cell information as {MG:XXXXXX} flags
 - `--preserve-formats`: Preserve number/date formatting as displayed in Excel
-- `--ignore-colors`: Comma-separated hex colors to ignore (e.g., "#FFFFFF,#000000")
+- `--ignore-colors`: Comma-separated hex colors to ignore for both foreground and background (e.g., "#FFFFFF,#000000")
+- `--ignore-bg-colors`: Comma-separated background colors to ignore (default: `#FFFFFF`)
+- `--ignore-fg-colors`: Comma-separated foreground colors to ignore (default: `#000000`)
 - `--add-location`: Add cell coordinates {l:A5} to non-empty cells
 - `--keep-empty-lines`: Preserve empty rows to maintain original row positions
-- `--max-rows`: Maximum number of rows to process (default: 300)
-- `--max-columns`: Maximum number of columns to process (default: 100)
-- `--no-header`: Exclude DataFrame column headers (A, B, C...) from output
+- `--max-rows`: Maximum number of visible rows in the output; hidden rows do not count (default: 300)
+- `--max-columns`: Maximum number of visible columns in the output; hidden columns do not count (default: 100)
+- `--no-header`: Exclude the column-letter header row (A, B, C...) from output. The CLI includes it by default; the Python API (`XlsxConverterConfig.header`) excludes it by default
 - `--keep-na`: Keep NA values instead of converting to empty strings
 
 ### Hidden Rows and Columns
@@ -414,9 +424,8 @@ except FileNotFoundError as e:
 ## Performance Considerations
 
 - The library uses multiple fallback engines (calamine, openpyxl, xlrd) for maximum compatibility
-- Large files are processed efficiently with streaming where possible
 - Color extraction uses caching to avoid repeated theme color lookups
-- Default limits of 300 rows and 100 columns can be adjusted using `--max-rows` and `--max-columns`
+- Default limits of 300 visible rows and 100 visible columns can be adjusted using `--max-rows` and `--max-columns`
 - Empty rows are automatically removed by default (use `--keep-empty-lines` to preserve them)
 - Trailing empty content is always trimmed to reduce file size
 
@@ -461,9 +470,9 @@ uv run flagged-csv --help
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to [open an issue](https://github.com/ross-jill-ws/flagged-csv/issues) or submit a [Pull Request](https://github.com/ross-jill-ws/flagged-csv/pulls).
 
-1. Fork the repository
+1. Fork the [repository](https://github.com/ross-jill-ws/flagged-csv)
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Run tests to ensure everything works (`uv run pytest tests/`)
 4. Commit your changes (`git commit -m 'Add amazing feature'`)
@@ -472,19 +481,20 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/ross-jill-ws/flagged-csv/blob/main/LICENSE) file for details.
 
 ## AI Integration Guide
 
 When using Flagged CSV with AI systems (ChatGPT, Claude, etc.), you have two options:
 
 ### Option 1: Use the provided prompt file
-Simply include the contents of `flagged-csv.prompt.md` in your conversation with the AI. This file contains the complete specification for the Flagged CSV format.
+Simply include the contents of [`flagged-csv.prompt.md`](https://github.com/ross-jill-ws/flagged-csv/blob/main/flagged-csv.prompt.md) in your conversation with the AI. This file contains the complete specification for the Flagged CSV format.
 
 ### Option 2: Use this condensed prompt
 ```
 The CSV data uses Flagged CSV format where:
-- {#RRGGBB} indicates cell background color (e.g., {#FF0000} is red)
+- {#RRGGBB} or {bc:#RRGGBB} indicates cell background color (e.g., {#FF0000} is red)
+- {fc:#RRGGBB} indicates cell font (foreground) color
 - {MG:XXXXXX} indicates merged cells (same ID = same merged group)
 - {l:CellRef} indicates the original Excel cell location (e.g., {l:A5} is cell A5)
 - The value in the merged cell should be applied to the entire range as a whole.
